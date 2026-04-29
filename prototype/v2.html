@@ -1,0 +1,1171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>WorldScan</title>
+<style>
+  :root {
+    --bg: #0b0d10;
+    --panel: #12161b;
+    --panel-2: #181d24;
+    --border: #232a33;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --accent: #5eead4;
+    --warn: #f59e0b;
+    --err: #f87171;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    overflow: hidden;
+  }
+  header {
+    border-bottom: 1px solid var(--border);
+    padding: 14px 24px;
+    display: flex; align-items: center; height: 56px;
+  }
+  .logo { font-size: 18px; font-weight: 700; letter-spacing: -0.02em; }
+  .logo span { color: var(--accent); }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 340px 1fr;
+    height: calc(100vh - 56px);
+  }
+  .sidebar {
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 20px;
+  }
+  .viewer { position: relative; background: #000; }
+  #canvas { width: 100%; height: 100%; display: block; }
+
+  .panel-section { margin-bottom: 22px; }
+  .panel-section h3 {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    margin: 0 0 10px;
+  }
+
+  .drop {
+    display: block;
+    border: 2px dashed #2c3441;
+    border-radius: 12px;
+    padding: 22px 16px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 12.5px;
+    line-height: 1.5;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s, color 0.15s;
+    user-select: none;
+  }
+  .drop:hover, .drop.drag {
+    border-color: var(--accent);
+    background: rgba(94,234,212,0.05);
+    color: var(--text);
+  }
+  .drop strong {
+    color: var(--text);
+    display: block;
+    margin-bottom: 2px;
+    font-weight: 600;
+    font-size: 13px;
+  }
+
+  .btn {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    cursor: pointer;
+    font-family: inherit;
+    width: 100%;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .btn:hover:not(:disabled) { background: #1d2330; border-color: #2c3441; }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .btn.primary { background: var(--accent); color: #062e26; border-color: var(--accent); font-weight: 600; }
+  .btn.primary:hover:not(:disabled) { background: #7af0db; }
+  .btn-row { display: flex; gap: 8px; }
+  .btn-row .btn { flex: 1; }
+
+  .row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 13px;
+    padding: 6px 0;
+    gap: 12px;
+  }
+  .row label { color: var(--muted); white-space: nowrap; }
+  .row input[type=range] { flex: 1; min-width: 0; accent-color: var(--accent); }
+  .row select {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-family: inherit;
+  }
+
+  .stats {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    font-size: 12px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    color: var(--muted);
+    line-height: 1.7;
+  }
+  .stats .k { color: var(--text); }
+
+  .status-bar {
+    position: absolute;
+    bottom: 16px; left: 16px; right: 16px;
+    background: rgba(18,22,27,0.92);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 12px;
+    color: var(--muted);
+    backdrop-filter: blur(8px);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .status-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--muted); flex-shrink: 0;
+  }
+  .status-dot.busy { background: var(--warn); animation: pulse 1.2s infinite; }
+  .status-dot.ok { background: var(--accent); }
+  .status-dot.err { background: var(--err); }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  .progress {
+    height: 4px;
+    background: var(--panel-2);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-top: 10px;
+    display: none;
+  }
+  .progress.show { display: block; }
+  .progress-bar { height: 100%; background: var(--accent); width: 0%; transition: width 0.2s; }
+
+  .thumbs {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+    margin-top: 12px;
+  }
+  .thumb {
+    position: relative;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    aspect-ratio: 1 / 1;
+    background: #000;
+  }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .thumb.fused { border-color: rgba(94,234,212,0.7); }
+  .thumb.unfused { border-color: rgba(245,158,11,0.7); }
+  .thumb .x {
+    position: absolute;
+    top: 4px; right: 4px;
+    width: 18px; height: 18px;
+    background: rgba(0,0,0,0.7);
+    color: var(--text);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px;
+    cursor: pointer;
+    line-height: 1;
+  }
+  .thumb .x:hover { background: var(--err); }
+  .thumb .badge-num {
+    position: absolute;
+    bottom: 4px; left: 4px;
+    background: rgba(0,0,0,0.7);
+    color: var(--text);
+    font-size: 9px;
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+
+  .overlay-controls {
+    position: absolute;
+    top: 16px; right: 16px;
+    background: rgba(18,22,27,0.92);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 11px;
+    color: var(--muted);
+    backdrop-filter: blur(8px);
+    line-height: 1.7;
+  }
+  .overlay-controls span { color: var(--text); font-family: ui-monospace, monospace; font-size: 10px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">World<span>Scan</span></div>
+</header>
+
+<div class="layout">
+  <aside class="sidebar">
+    <div class="panel-section">
+      <h3>Photos</h3>
+      <label class="drop" id="drop-image">
+        <strong>Drop photos here</strong>
+        or click to choose (one or many)
+        <input type="file" id="file-image" accept="image/*" multiple style="display:none" />
+      </label>
+      <div class="thumbs" id="thumbs"></div>
+      <div class="progress" id="depth-progress"><div class="progress-bar" id="depth-progress-bar"></div></div>
+    </div>
+
+    <div class="panel-section">
+      <button class="btn primary" id="btn-reconstruct" disabled>Reconstruct</button>
+    </div>
+
+    <div class="panel-section">
+      <h3>View</h3>
+      <div class="row">
+        <label>Mode</label>
+        <select id="view-mode">
+          <option value="mesh">Mesh</option>
+          <option value="points">Points</option>
+        </select>
+      </div>
+      <div class="row">
+        <label>Point size</label>
+        <input type="range" id="point-size" min="1" max="8" step="0.5" value="2.5" />
+      </div>
+      <div class="row">
+        <label>Depth scale</label>
+        <input type="range" id="depth-scale" min="0.5" max="5" step="0.1" value="2" />
+      </div>
+      <div class="row">
+        <label>FOV</label>
+        <input type="range" id="fov" min="40" max="100" step="1" value="60" />
+      </div>
+    </div>
+
+    <div class="panel-section">
+      <h3>Export</h3>
+      <div class="btn-row">
+        <button class="btn" id="btn-export-ply" disabled>PLY</button>
+        <button class="btn" id="btn-export-obj" disabled>OBJ</button>
+      </div>
+    </div>
+
+    <div class="panel-section">
+      <h3>Stats</h3>
+      <div class="stats">
+        <div>photos: <span class="k" id="stat-photos">—</span></div>
+        <div>fused: <span class="k" id="stat-fused">—</span></div>
+        <div>vertices: <span class="k" id="stat-verts">—</span></div>
+        <div>triangles: <span class="k" id="stat-tris">—</span></div>
+        <div>time: <span class="k" id="stat-time">—</span></div>
+      </div>
+    </div>
+  </aside>
+
+  <main class="viewer">
+    <canvas id="canvas"></canvas>
+    <div class="overlay-controls">
+      <div>drag <span>orbit</span></div>
+      <div>shift+drag <span>pan</span></div>
+      <div>wheel <span>zoom</span></div>
+      <div>r <span>reset view</span></div>
+    </div>
+    <div class="status-bar">
+      <div class="status-dot" id="status-dot"></div>
+      <div id="status-text">Ready.</div>
+    </div>
+  </main>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.1/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ---------- Helpers ----------
+const $ = (id) => document.getElementById(id);
+const yieldUI = () => new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));
+const setStatus = (text, kind = 'idle') => {
+  $('status-text').textContent = text;
+  const dot = $('status-dot');
+  dot.className = 'status-dot' + (kind === 'busy' ? ' busy' : kind === 'ok' ? ' ok' : kind === 'err' ? ' err' : '');
+};
+
+// Lazy transformers.js
+let pipeline = null;
+let env = null;
+async function loadTransformers() {
+  if (pipeline) return;
+  const mod = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.2');
+  pipeline = mod.pipeline;
+  env = mod.env;
+  env.allowLocalModels = false;
+  env.useBrowserCache = true;
+}
+
+// ---------- Three.js scene ----------
+const canvas = $('canvas');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x000000);
+
+const camera = new THREE.PerspectiveCamera(50, 1, 0.01, 1000);
+camera.position.set(0, 0, 4);
+
+const controls = new OrbitControls(camera, canvas);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+dir.position.set(2, 4, 3);
+scene.add(dir);
+
+const grid = new THREE.GridHelper(20, 20, 0x222222, 0x1a1a1a);
+grid.position.y = -2;
+scene.add(grid);
+
+let currentObject = null;
+let lastReconstructions = [];
+
+function clearScene() {
+  if (currentObject) {
+    scene.remove(currentObject);
+    currentObject.geometry?.dispose();
+    if (Array.isArray(currentObject.material)) currentObject.material.forEach(m => m.dispose());
+    else currentObject.material?.dispose();
+    currentObject = null;
+  }
+}
+
+function resize() {
+  const rect = canvas.getBoundingClientRect();
+  renderer.setSize(rect.width, rect.height, false);
+  camera.aspect = rect.width / rect.height;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+resize();
+
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'r' || e.key === 'R') {
+    if (currentObject) frameObject(currentObject);
+  }
+});
+
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+
+// ---------- Image upload ----------
+let inputImages = [];
+let _nextId = 1;
+
+const dropImage = $('drop-image');
+const fileImage = $('file-image');
+
+dropImage.onclick = () => fileImage.click();
+['dragenter', 'dragover'].forEach(e => dropImage.addEventListener(e, ev => { ev.preventDefault(); dropImage.classList.add('drag'); }));
+['dragleave', 'drop'].forEach(e => dropImage.addEventListener(e, ev => { ev.preventDefault(); dropImage.classList.remove('drag'); }));
+dropImage.addEventListener('drop', ev => {
+  const files = Array.from(ev.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+  files.forEach(addImageFile);
+});
+fileImage.onchange = () => {
+  Array.from(fileImage.files || []).forEach(addImageFile);
+  fileImage.value = '';
+};
+
+function addImageFile(file) {
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    const id = _nextId++;
+    inputImages.push({ id, image: img, name: file.name, src: url, fused: null });
+    renderThumbs();
+    updateButtons();
+    setStatus(`${inputImages.length} photo${inputImages.length === 1 ? '' : 's'} ready.`, 'ok');
+  };
+  img.onerror = () => setStatus(`Failed to load ${file.name}.`, 'err');
+  img.src = url;
+}
+
+function renderThumbs() {
+  const container = $('thumbs');
+  container.innerHTML = '';
+  inputImages.forEach((it, idx) => {
+    const div = document.createElement('div');
+    let cls = 'thumb';
+    if (it.fused === true) cls += ' fused';
+    else if (it.fused === false) cls += ' unfused';
+    div.className = cls;
+    const im = document.createElement('img');
+    im.src = it.src;
+    div.appendChild(im);
+    const num = document.createElement('div');
+    num.className = 'badge-num';
+    num.textContent = idx + 1;
+    div.appendChild(num);
+    const x = document.createElement('div');
+    x.className = 'x';
+    x.textContent = '×';
+    x.onclick = (e) => {
+      e.stopPropagation();
+      inputImages = inputImages.filter(i => i.id !== it.id);
+      renderThumbs();
+      updateButtons();
+      if (inputImages.length === 0) {
+        clearScene();
+        lastReconstructions = [];
+        $('btn-export-ply').disabled = true;
+        $('btn-export-obj').disabled = true;
+        ['stat-photos','stat-fused','stat-verts','stat-tris','stat-time'].forEach(id => $(id).textContent = '—');
+        setStatus('Ready.');
+      }
+    };
+    div.appendChild(x);
+    container.appendChild(div);
+  });
+}
+
+function updateButtons() {
+  $('btn-reconstruct').disabled = inputImages.length === 0;
+}
+
+// ---------- Depth model ----------
+let _device = 'wasm';
+let depthEstimator = null;
+async function ensureDepthModel() {
+  if (depthEstimator) return depthEstimator;
+  if (typeof navigator !== 'undefined' && navigator.gpu) {
+    try { const a = await navigator.gpu.requestAdapter(); if (a) _device = 'webgpu'; } catch (e) {}
+  }
+  setStatus('Loading depth model (one-time download)…', 'busy');
+  $('depth-progress').classList.add('show');
+  const bar = $('depth-progress-bar');
+  const cb = (data) => {
+    if (data.status === 'progress' && typeof data.progress === 'number') {
+      bar.style.width = `${data.progress}%`;
+    }
+  };
+  try {
+    depthEstimator = await pipeline('depth-estimation', 'onnx-community/depth-anything-v2-small', {
+      device: _device, progress_callback: cb
+    });
+  } catch (e) {
+    console.warn('Primary model failed, falling back:', e);
+    depthEstimator = await pipeline('depth-estimation', 'Xenova/depth-anything-small-hf', {
+      device: _device, progress_callback: cb
+    });
+  }
+  $('depth-progress').classList.remove('show');
+  bar.style.width = '0%';
+  return depthEstimator;
+}
+
+// ---------- Reconstruction ----------
+$('btn-reconstruct').onclick = async () => {
+  if (inputImages.length === 0) return;
+  $('btn-reconstruct').disabled = true;
+  try {
+    setStatus('Loading depth model…', 'busy');
+    await yieldUI();
+    await loadTransformers();
+    await ensureDepthModel();
+
+    const t0 = performance.now();
+    const recons = [];
+    for (let i = 0; i < inputImages.length; i++) {
+      const it = inputImages[i];
+      setStatus(`Estimating depth ${i + 1} of ${inputImages.length}…`, 'busy');
+      await yieldUI();
+
+      const result = await depthEstimator(it.src);
+      await yieldUI();
+      const tensor = result.predicted_depth;
+      const dims = tensor.dims;
+      const dh = dims[dims.length - 2];
+      const dw = dims[dims.length - 1];
+      const recon = backProject(it.image, tensor.data, dw, dh);
+      recon.image = it.image;
+      recons.push(recon);
+      await yieldUI();
+    }
+
+    if (recons.length > 1) {
+      await fuseReconstructions(recons);
+    } else {
+      recons[0].transform = identity4();
+      inputImages[0].fused = null;
+    }
+
+    const t1 = performance.now();
+    lastReconstructions = recons;
+    renderReconstructions();
+
+    let totalV = 0, totalT = 0, fusedCount = 0;
+    for (let i = 0; i < recons.length; i++) {
+      totalV += recons[i].positions.length / 3;
+      totalT += recons[i].indices.length / 3;
+      if (i === 0 || recons[i].fusionOK) fusedCount++;
+    }
+    $('stat-photos').textContent = recons.length;
+    $('stat-fused').textContent = recons.length > 1 ? `${fusedCount} / ${recons.length}` : '—';
+    $('stat-verts').textContent = totalV.toLocaleString();
+    $('stat-tris').textContent = totalT.toLocaleString();
+    $('stat-time').textContent = `${((t1 - t0) / 1000).toFixed(1)} s`;
+    renderThumbs();
+
+    $('btn-export-ply').disabled = false;
+    $('btn-export-obj').disabled = false;
+
+    if (recons.length === 1) setStatus('Done.', 'ok');
+    else if (fusedCount === recons.length) setStatus(`Done. All ${recons.length} photos fused.`, 'ok');
+    else setStatus(`Done. ${fusedCount} of ${recons.length} fused — others placed beside (no overlap detected).`, 'ok');
+  } catch (e) {
+    console.error(e);
+    setStatus(`Error: ${e.message}`, 'err');
+  } finally {
+    $('btn-reconstruct').disabled = false;
+  }
+};
+
+function backProject(img, depthData, dw, dh) {
+  const off = document.createElement('canvas');
+  off.width = dw; off.height = dh;
+  const ictx = off.getContext('2d');
+  ictx.drawImage(img, 0, 0, dw, dh);
+  const colorPix = ictx.getImageData(0, 0, dw, dh).data;
+
+  let mn = Infinity, mx = -Infinity;
+  for (const v of depthData) { if (v < mn) mn = v; if (v > mx) mx = v; }
+  const range = mx - mn || 1;
+
+  const fov = parseFloat($('fov').value) * Math.PI / 180;
+  const fx = dw / (2 * Math.tan(fov / 2));
+  const fy = fx;
+  const cx = dw / 2, cy = dh / 2;
+  const depthScale = parseFloat($('depth-scale').value);
+
+  const positions = new Float32Array(dw * dh * 3);
+  const colors = new Float32Array(dw * dh * 3);
+  const zArr = new Float32Array(dw * dh);
+  const gray = new Uint8Array(dw * dh);
+
+  for (let v = 0; v < dh; v++) {
+    for (let u = 0; u < dw; u++) {
+      const i = v * dw + u;
+      const t = (depthData[i] - mn) / range;
+      const z = (0.4 + (1 - t) * 1.6) * depthScale;
+      zArr[i] = z;
+      positions[i*3]     = (u - cx) * z / fx;
+      positions[i*3 + 1] = -(v - cy) * z / fy;
+      positions[i*3 + 2] = -z;
+      const r = colorPix[i*4], g = colorPix[i*4 + 1], b = colorPix[i*4 + 2];
+      colors[i*3] = r / 255; colors[i*3 + 1] = g / 255; colors[i*3 + 2] = b / 255;
+      gray[i] = (r * 0.299 + g * 0.587 + b * 0.114) | 0;
+    }
+  }
+
+  const indices = [];
+  const discontinuity = 0.18 * depthScale;
+  for (let v = 0; v < dh - 1; v++) {
+    for (let u = 0; u < dw - 1; u++) {
+      const i00 = v * dw + u;
+      const i10 = v * dw + (u + 1);
+      const i01 = (v + 1) * dw + u;
+      const i11 = (v + 1) * dw + (u + 1);
+      const z00 = zArr[i00], z10 = zArr[i10], z01 = zArr[i01], z11 = zArr[i11];
+      const span = Math.max(z00, z10, z01, z11) - Math.min(z00, z10, z01, z11);
+      if (span > discontinuity) continue;
+      indices.push(i00, i11, i10);
+      indices.push(i00, i01, i11);
+    }
+  }
+
+  return { positions, colors, indices: new Uint32Array(indices), w: dw, h: dh, gray };
+}
+
+// ============================================================
+// Pure-JS feature matching: FAST corners + BRIEF descriptors
+// ============================================================
+const FAST_OFFSETS = [
+  [0,-3],[1,-3],[2,-2],[3,-1],[3,0],[3,1],[2,2],[1,3],
+  [0,3],[-1,3],[-2,2],[-3,1],[-3,0],[-3,-1],[-2,-2],[-1,-3]
+];
+
+function detectFAST(gray, w, h, threshold = 22, maxCorners = 800) {
+  const scoreMap = new Float32Array(w * h);
+  const candidates = [];
+
+  for (let y = 4; y < h - 4; y++) {
+    for (let x = 4; x < w - 4; x++) {
+      const c = gray[y * w + x];
+      const tT = c + threshold, tD = c - threshold;
+      const p0 = gray[(y-3)*w + x];
+      const p4 = gray[y*w + (x+3)];
+      const p8 = gray[(y+3)*w + x];
+      const p12 = gray[y*w + (x-3)];
+      let qB = 0, qD = 0;
+      if (p0 > tT) qB++; else if (p0 < tD) qD++;
+      if (p4 > tT) qB++; else if (p4 < tD) qD++;
+      if (p8 > tT) qB++; else if (p8 < tD) qD++;
+      if (p12 > tT) qB++; else if (p12 < tD) qD++;
+      if (qB < 3 && qD < 3) continue;
+
+      let maxRunB = 0, maxRunD = 0, runB = 0, runD = 0;
+      for (let i = 0; i < 24; i++) {
+        const idx = i & 15;
+        const off = FAST_OFFSETS[idx];
+        const v = gray[(y + off[1]) * w + (x + off[0])];
+        if (v > tT) {
+          runB++; if (runB > maxRunB) maxRunB = runB;
+          runD = 0;
+        } else if (v < tD) {
+          runD++; if (runD > maxRunD) maxRunD = runD;
+          runB = 0;
+        } else {
+          runB = 0; runD = 0;
+        }
+      }
+      if (maxRunB < 9 && maxRunD < 9) continue;
+
+      let score = 0;
+      for (let i = 0; i < 16; i++) {
+        const off = FAST_OFFSETS[i];
+        score += Math.abs(gray[(y + off[1]) * w + (x + off[0])] - c);
+      }
+      scoreMap[y * w + x] = score;
+      candidates.push({ x, y, score });
+    }
+  }
+
+  // Non-max suppression
+  const keep = [];
+  for (const c of candidates) {
+    const s = c.score;
+    let isMax = true;
+    for (let dy = -1; dy <= 1 && isMax; dy++) {
+      for (let dx = -1; dx <= 1 && isMax; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        if (scoreMap[(c.y + dy) * w + (c.x + dx)] > s) isMax = false;
+      }
+    }
+    if (isMax) keep.push(c);
+  }
+  keep.sort((a, b) => b.score - a.score);
+  return keep.slice(0, maxCorners);
+}
+
+const BRIEF_PATCH = 31;
+const BRIEF_BITS = 256;
+const BRIEF_BYTES = BRIEF_BITS >> 3;
+let _briefPairs = null;
+function getBriefPairs() {
+  if (_briefPairs) return _briefPairs;
+  let seed = 1234567;
+  const rng = () => {
+    seed = (seed + 0x6D2B79F5) | 0;
+    let t = seed;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const r = BRIEF_PATCH >> 1;
+  const pairs = new Int8Array(BRIEF_BITS * 4);
+  for (let i = 0; i < BRIEF_BITS; i++) {
+    pairs[i*4]     = ((rng() * BRIEF_PATCH) | 0) - r;
+    pairs[i*4 + 1] = ((rng() * BRIEF_PATCH) | 0) - r;
+    pairs[i*4 + 2] = ((rng() * BRIEF_PATCH) | 0) - r;
+    pairs[i*4 + 3] = ((rng() * BRIEF_PATCH) | 0) - r;
+  }
+  _briefPairs = pairs;
+  return pairs;
+}
+
+function computeBRIEF(gray, w, h, corners) {
+  const pairs = getBriefPairs();
+  const margin = (BRIEF_PATCH >> 1) + 1;
+  const out = [];
+  for (const c of corners) {
+    if (c.x < margin || c.x >= w - margin || c.y < margin || c.y >= h - margin) continue;
+    const desc = new Uint8Array(BRIEF_BYTES);
+    for (let i = 0; i < BRIEF_BITS; i++) {
+      const dx1 = pairs[i*4],     dy1 = pairs[i*4 + 1];
+      const dx2 = pairs[i*4 + 2], dy2 = pairs[i*4 + 3];
+      const a = gray[(c.y + dy1) * w + (c.x + dx1)];
+      const b = gray[(c.y + dy2) * w + (c.x + dx2)];
+      if (a < b) desc[i >> 3] |= (1 << (i & 7));
+    }
+    out.push({ x: c.x, y: c.y, desc });
+  }
+  return out;
+}
+
+const POPCOUNT = new Uint8Array(256);
+for (let i = 0; i < 256; i++) {
+  let v = i, c = 0;
+  while (v) { c += v & 1; v >>= 1; }
+  POPCOUNT[i] = c;
+}
+function hamming32(a, b) {
+  let d = 0;
+  for (let i = 0; i < BRIEF_BYTES; i++) d += POPCOUNT[a[i] ^ b[i]];
+  return d;
+}
+
+function matchDescriptors(featsA, featsB, ratio = 0.8, maxDist = 80) {
+  const matches = [];
+  for (let i = 0; i < featsA.length; i++) {
+    let best = 9999, second = 9999, bestJ = -1;
+    const da = featsA[i].desc;
+    for (let j = 0; j < featsB.length; j++) {
+      const d = hamming32(da, featsB[j].desc);
+      if (d < best) { second = best; best = d; bestJ = j; }
+      else if (d < second) second = d;
+    }
+    if (bestJ >= 0 && best < maxDist && best < ratio * second) {
+      matches.push({ a: i, b: bestJ, dist: best });
+    }
+  }
+  return matches;
+}
+
+// ============================================================
+// 3x3 symmetric eigendecomposition (Jacobi) + Umeyama transform
+// ============================================================
+function jacobiEigen3x3(Ain) {
+  const a = [Ain[0],Ain[1],Ain[2],Ain[3],Ain[4],Ain[5],Ain[6],Ain[7],Ain[8]];
+  const v = [1,0,0, 0,1,0, 0,0,1];
+
+  for (let iter = 0; iter < 60; iter++) {
+    const a01 = Math.abs(a[1]), a02 = Math.abs(a[2]), a12 = Math.abs(a[5]);
+    let p, q;
+    if (a01 >= a02 && a01 >= a12) { p = 0; q = 1; }
+    else if (a02 >= a12) { p = 0; q = 2; }
+    else { p = 1; q = 2; }
+    const apq = a[p*3 + q];
+    if (Math.abs(apq) < 1e-12) break;
+
+    const app = a[p*3 + p], aqq = a[q*3 + q];
+    const theta = (aqq - app) / (2 * apq);
+    let t;
+    if (Math.abs(theta) > 1e10) t = 1 / (2 * theta);
+    else {
+      const sgn = theta < 0 ? -1 : 1;
+      t = sgn / (Math.abs(theta) + Math.sqrt(theta * theta + 1));
+    }
+    const c = 1 / Math.sqrt(t * t + 1);
+    const s = t * c;
+
+    a[p*3 + p] = app - t * apq;
+    a[q*3 + q] = aqq + t * apq;
+    a[p*3 + q] = 0; a[q*3 + p] = 0;
+
+    for (let r = 0; r < 3; r++) {
+      if (r === p || r === q) continue;
+      const arp = a[r*3 + p], arq = a[r*3 + q];
+      a[r*3 + p] = c * arp - s * arq;
+      a[p*3 + r] = a[r*3 + p];
+      a[r*3 + q] = s * arp + c * arq;
+      a[q*3 + r] = a[r*3 + q];
+    }
+    for (let r = 0; r < 3; r++) {
+      const vrp = v[r*3 + p], vrq = v[r*3 + q];
+      v[r*3 + p] = c * vrp - s * vrq;
+      v[r*3 + q] = s * vrp + c * vrq;
+    }
+  }
+
+  return { values: [a[0], a[4], a[8]], vectors: v };
+}
+
+function umeyamaTransform(srcPts, dstPts) {
+  const n = srcPts.length;
+  if (n < 3) return null;
+
+  let csx=0,csy=0,csz=0, cdx=0,cdy=0,cdz=0;
+  for (let i = 0; i < n; i++) {
+    csx += srcPts[i][0]; csy += srcPts[i][1]; csz += srcPts[i][2];
+    cdx += dstPts[i][0]; cdy += dstPts[i][1]; cdz += dstPts[i][2];
+  }
+  csx /= n; csy /= n; csz /= n; cdx /= n; cdy /= n; cdz /= n;
+
+  // H = (1/n) sum (dst-cd)(src-cs)^T
+  const H = new Float64Array(9);
+  let sigSrc = 0;
+  for (let i = 0; i < n; i++) {
+    const sx = srcPts[i][0]-csx, sy = srcPts[i][1]-csy, sz = srcPts[i][2]-csz;
+    const dx = dstPts[i][0]-cdx, dy = dstPts[i][1]-cdy, dz = dstPts[i][2]-cdz;
+    H[0] += dx*sx; H[1] += dx*sy; H[2] += dx*sz;
+    H[3] += dy*sx; H[4] += dy*sy; H[5] += dy*sz;
+    H[6] += dz*sx; H[7] += dz*sy; H[8] += dz*sz;
+    sigSrc += sx*sx + sy*sy + sz*sz;
+  }
+  for (let k = 0; k < 9; k++) H[k] /= n;
+  sigSrc /= n;
+  if (sigSrc < 1e-9) return null;
+
+  // H^T H
+  const HtH = new Float64Array(9);
+  for (let r = 0; r < 3; r++) {
+    for (let c = 0; c < 3; c++) {
+      let s = 0;
+      for (let k = 0; k < 3; k++) s += H[k*3 + r] * H[k*3 + c];
+      HtH[r*3 + c] = s;
+    }
+  }
+
+  const { values: ev, vectors: V } = jacobiEigen3x3(HtH);
+
+  const order = [0, 1, 2].sort((a, b) => ev[b] - ev[a]);
+  const S = [Math.sqrt(Math.max(0, ev[order[0]])), Math.sqrt(Math.max(0, ev[order[1]])), Math.sqrt(Math.max(0, ev[order[2]]))];
+
+  // Vsorted: columns are eigenvectors in descending eigenvalue order
+  const Vs = new Float64Array(9);
+  for (let c = 0; c < 3; c++) for (let r = 0; r < 3; r++) Vs[r*3 + c] = V[r*3 + order[c]];
+
+  // U = H V Σ^-1
+  const U = new Float64Array(9);
+  for (let c = 0; c < 3; c++) {
+    if (S[c] < 1e-9) continue;
+    for (let r = 0; r < 3; r++) {
+      let sum = 0;
+      for (let k = 0; k < 3; k++) sum += H[r*3 + k] * Vs[k*3 + c];
+      U[r*3 + c] = sum / S[c];
+    }
+  }
+
+  // det(U V^T)
+  const UVt = new Float64Array(9);
+  for (let r = 0; r < 3; r++) {
+    for (let c = 0; c < 3; c++) {
+      let sum = 0;
+      for (let k = 0; k < 3; k++) sum += U[r*3 + k] * Vs[c*3 + k];
+      UVt[r*3 + c] = sum;
+    }
+  }
+  const detUVt = UVt[0]*(UVt[4]*UVt[8]-UVt[5]*UVt[7])
+               - UVt[1]*(UVt[3]*UVt[8]-UVt[5]*UVt[6])
+               + UVt[2]*(UVt[3]*UVt[7]-UVt[4]*UVt[6]);
+  const d = detUVt < 0 ? -1 : 1;
+
+  const Ud = [U[0], U[1], d*U[2], U[3], U[4], d*U[5], U[6], U[7], d*U[8]];
+  const R = new Float64Array(9);
+  for (let r = 0; r < 3; r++) {
+    for (let c = 0; c < 3; c++) {
+      let sum = 0;
+      for (let k = 0; k < 3; k++) sum += Ud[r*3 + k] * Vs[c*3 + k];
+      R[r*3 + c] = sum;
+    }
+  }
+
+  const s = (S[0] + S[1] + d * S[2]) / sigSrc;
+  if (!isFinite(s) || s <= 0 || s > 100) return null;
+
+  const tx = cdx - s * (R[0]*csx + R[1]*csy + R[2]*csz);
+  const ty = cdy - s * (R[3]*csx + R[4]*csy + R[5]*csz);
+  const tz = cdz - s * (R[6]*csx + R[7]*csy + R[8]*csz);
+
+  const M = new Float32Array(16);
+  M[0]=s*R[0]; M[1]=s*R[1]; M[2]=s*R[2];   M[3]=tx;
+  M[4]=s*R[3]; M[5]=s*R[4]; M[6]=s*R[5];   M[7]=ty;
+  M[8]=s*R[6]; M[9]=s*R[7]; M[10]=s*R[8];  M[11]=tz;
+  M[12]=0; M[13]=0; M[14]=0; M[15]=1;
+  return M;
+}
+
+async function ransacUmeyama(srcPts, dstPts, iters = 200, thresh = 0.15) {
+  const n = srcPts.length;
+  if (n < 4) {
+    const T = umeyamaTransform(srcPts, dstPts);
+    return T ? { transform: T, count: n, inliers: srcPts.map((_, i) => i) } : null;
+  }
+  let best = { count: 0, transform: null, inliers: [] };
+  const t2 = thresh * thresh;
+  for (let it = 0; it < iters; it++) {
+    const idx = [];
+    while (idx.length < 4) {
+      const r = (Math.random() * n) | 0;
+      if (!idx.includes(r)) idx.push(r);
+    }
+    const ss = idx.map(i => srcPts[i]);
+    const sd = idx.map(i => dstPts[i]);
+    const T = umeyamaTransform(ss, sd);
+    if (!T) continue;
+    const inliers = [];
+    for (let i = 0; i < n; i++) {
+      const p = applyMat4(T, srcPts[i]);
+      const dx = p[0]-dstPts[i][0], dy = p[1]-dstPts[i][1], dz = p[2]-dstPts[i][2];
+      if (dx*dx + dy*dy + dz*dz < t2) inliers.push(i);
+    }
+    if (inliers.length > best.count) {
+      best.count = inliers.length;
+      best.transform = T;
+      best.inliers = inliers;
+    }
+    if ((it & 31) === 31) await yieldUI();
+  }
+  if (best.count >= 6) {
+    const ss = best.inliers.map(i => srcPts[i]);
+    const sd = best.inliers.map(i => dstPts[i]);
+    const T = umeyamaTransform(ss, sd);
+    if (T) best.transform = T;
+  }
+  return best;
+}
+
+// ============================================================
+// Multi-view fusion driver
+// ============================================================
+async function fuseReconstructions(recons) {
+  recons[0].transform = identity4();
+  recons[0].fusionOK = true;
+  inputImages[0].fused = true;
+
+  const features = [];
+  for (let i = 0; i < recons.length; i++) {
+    setStatus(`Detecting features ${i + 1} of ${recons.length}…`, 'busy');
+    await yieldUI();
+    const r = recons[i];
+    const corners = detectFAST(r.gray, r.w, r.h, 22, 800);
+    const desc = computeBRIEF(r.gray, r.w, r.h, corners);
+    features.push(desc);
+    await yieldUI();
+  }
+
+  for (let i = 1; i < recons.length; i++) {
+    setStatus(`Aligning photo ${i + 1}…`, 'busy');
+    await yieldUI();
+
+    let best = null;
+    for (let j = i - 1; j >= 0; j--) {
+      if (!recons[j].fusionOK) continue;
+      const result = await alignPair(features[j], features[i], recons[j], recons[i]);
+      if (result && (!best || result.inlierCount > best.inlierCount)) {
+        best = { ...result, refIdx: j };
+      }
+      await yieldUI();
+      if (best && best.inlierCount > 50) break;
+    }
+
+    if (best && best.inlierCount >= 10) {
+      recons[i].transform = mulMat4(recons[best.refIdx].transform, best.matrix);
+      recons[i].fusionOK = true;
+      inputImages[i].fused = true;
+    } else {
+      recons[i].transform = mulMat4(recons[i - 1].transform, translate4(3.0, 0, 0));
+      recons[i].fusionOK = false;
+      inputImages[i].fused = false;
+    }
+  }
+}
+
+async function alignPair(featA, featB, reconA, reconB) {
+  if (featA.length === 0 || featB.length === 0) return null;
+  const matches = matchDescriptors(featB, featA, 0.8, 80);
+  if (matches.length < 8) return null;
+
+  const ptsA = [], ptsB = [];
+  for (const m of matches) {
+    const fb = featB[m.a], fa = featA[m.b];
+    const idxA = fa.y * reconA.w + fa.x;
+    const idxB = fb.y * reconB.w + fb.x;
+    ptsA.push([reconA.positions[idxA*3], reconA.positions[idxA*3+1], reconA.positions[idxA*3+2]]);
+    ptsB.push([reconB.positions[idxB*3], reconB.positions[idxB*3+1], reconB.positions[idxB*3+2]]);
+  }
+  await yieldUI();
+  const result = await ransacUmeyama(ptsB, ptsA, 200, 0.15);
+  if (!result || !result.transform) return null;
+  return { matrix: result.transform, inlierCount: result.count };
+}
+
+// ============================================================
+// Mat4 helpers + render
+// ============================================================
+function identity4() { return new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]); }
+function translate4(x, y, z) { return new Float32Array([1,0,0,x, 0,1,0,y, 0,0,1,z, 0,0,0,1]); }
+function mulMat4(a, b) {
+  const o = new Float32Array(16);
+  for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) {
+    let s = 0;
+    for (let k = 0; k < 4; k++) s += a[r*4+k] * b[k*4+c];
+    o[r*4+c] = s;
+  }
+  return o;
+}
+function applyMat4(m, p) {
+  return [
+    m[0]*p[0] + m[1]*p[1] + m[2]*p[2] + m[3],
+    m[4]*p[0] + m[5]*p[1] + m[6]*p[2] + m[7],
+    m[8]*p[0] + m[9]*p[1] + m[10]*p[2] + m[11],
+  ];
+}
+function transformPositions(positions, m) {
+  const out = new Float32Array(positions.length);
+  for (let i = 0; i < positions.length; i += 3) {
+    const x = positions[i], y = positions[i+1], z = positions[i+2];
+    out[i]   = m[0]*x + m[1]*y + m[2]*z + m[3];
+    out[i+1] = m[4]*x + m[5]*y + m[6]*z + m[7];
+    out[i+2] = m[8]*x + m[9]*y + m[10]*z + m[11];
+  }
+  return out;
+}
+
+function renderReconstructions() {
+  if (lastReconstructions.length === 0) return;
+  clearScene();
+
+  const mode = $('view-mode').value;
+  const n = lastReconstructions.length;
+  let totalV = 0, totalI = 0;
+  for (const r of lastReconstructions) { totalV += r.positions.length / 3; totalI += r.indices.length; }
+  const positions = new Float32Array(totalV * 3);
+  const colors = new Float32Array(totalV * 3);
+  const indices = new Uint32Array(totalI);
+
+  let vOff = 0, iOff = 0;
+  for (let k = 0; k < n; k++) {
+    const r = lastReconstructions[k];
+    const M = r.transform || identity4();
+    const transformed = transformPositions(r.positions, M);
+    positions.set(transformed, vOff * 3);
+    colors.set(r.colors, vOff * 3);
+    for (let j = 0; j < r.indices.length; j++) indices[iOff + j] = r.indices[j] + vOff;
+    vOff += r.positions.length / 3;
+    iOff += r.indices.length;
+  }
+
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+  if (mode === 'mesh') {
+    geom.setIndex(new THREE.BufferAttribute(indices, 1));
+    geom.computeVertexNormals();
+    const mat = new THREE.MeshStandardMaterial({
+      vertexColors: true, side: THREE.DoubleSide, roughness: 0.95, metalness: 0
+    });
+    currentObject = new THREE.Mesh(geom, mat);
+  } else {
+    const mat = new THREE.PointsMaterial({
+      vertexColors: true, size: parseFloat($('point-size').value) * 0.005, sizeAttenuation: true
+    });
+    currentObject = new THREE.Points(geom, mat);
+  }
+  scene.add(currentObject);
+  frameObject(currentObject);
+}
+
+function frameObject(obj) {
+  obj.geometry.computeBoundingSphere();
+  const s = obj.geometry.boundingSphere;
+  if (!s) return;
+  controls.target.copy(s.center);
+  camera.position.set(s.center.x, s.center.y, s.center.z + s.radius * 1.6);
+  controls.update();
+}
+
+$('view-mode').onchange = renderReconstructions;
+$('point-size').oninput = () => {
+  if (currentObject && currentObject.material.isPointsMaterial) {
+    currentObject.material.size = parseFloat($('point-size').value) * 0.005;
+  }
+};
+
+// ---------- Export ----------
+function buildMergedMesh() {
+  const n = lastReconstructions.length;
+  let totalV = 0, totalI = 0;
+  for (const r of lastReconstructions) { totalV += r.positions.length / 3; totalI += r.indices.length; }
+  const positions = new Float32Array(totalV * 3);
+  const colors = new Float32Array(totalV * 3);
+  const indices = new Uint32Array(totalI);
+  let vOff = 0, iOff = 0;
+  for (let k = 0; k < n; k++) {
+    const r = lastReconstructions[k];
+    const M = r.transform || identity4();
+    const transformed = transformPositions(r.positions, M);
+    positions.set(transformed, vOff * 3);
+    colors.set(r.colors, vOff * 3);
+    for (let j = 0; j < r.indices.length; j++) indices[iOff + j] = r.indices[j] + vOff;
+    vOff += r.positions.length / 3;
+    iOff += r.indices.length;
+  }
+  return { positions, colors, indices };
+}
+
+$('btn-export-ply').onclick = () => {
+  if (lastReconstructions.length === 0) return;
+  const { positions, colors, indices } = buildMergedMesh();
+  const nv = positions.length / 3, nf = indices.length / 3;
+  let s = `ply\nformat ascii 1.0\nelement vertex ${nv}\nproperty float x\nproperty float y\nproperty float z\nproperty uchar red\nproperty uchar green\nproperty uchar blue\nelement face ${nf}\nproperty list uchar int vertex_indices\nend_header\n`;
+  const lines = [];
+  for (let i = 0; i < nv; i++) {
+    lines.push(`${positions[i*3].toFixed(4)} ${positions[i*3+1].toFixed(4)} ${positions[i*3+2].toFixed(4)} ${Math.round(colors[i*3]*255)} ${Math.round(colors[i*3+1]*255)} ${Math.round(colors[i*3+2]*255)}`);
+  }
+  for (let i = 0; i < nf; i++) lines.push(`3 ${indices[i*3]} ${indices[i*3+1]} ${indices[i*3+2]}`);
+  s += lines.join('\n') + '\n';
+  download(new Blob([s], { type: 'text/plain' }), 'worldscan.ply');
+};
+
+$('btn-export-obj').onclick = () => {
+  if (lastReconstructions.length === 0) return;
+  const { positions, colors, indices } = buildMergedMesh();
+  const nv = positions.length / 3, nf = indices.length / 3;
+  const lines = [];
+  for (let i = 0; i < nv; i++) {
+    lines.push(`v ${positions[i*3].toFixed(4)} ${positions[i*3+1].toFixed(4)} ${positions[i*3+2].toFixed(4)} ${colors[i*3].toFixed(3)} ${colors[i*3+1].toFixed(3)} ${colors[i*3+2].toFixed(3)}`);
+  }
+  for (let i = 0; i < nf; i++) lines.push(`f ${indices[i*3]+1} ${indices[i*3+1]+1} ${indices[i*3+2]+1}`);
+  download(new Blob([lines.join('\n')], { type: 'text/plain' }), 'worldscan.obj');
+};
+
+function download(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+setStatus('Ready.');
+</script>
+</body>
+</html>
