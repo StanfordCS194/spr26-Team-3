@@ -1,0 +1,1033 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>WorldScan — Training Data Platform for Robot Foundation Models</title>
+<style>
+  :root {
+    --bg: #0b0d10;
+    --panel: #12161b;
+    --panel-2: #181d24;
+    --border: #232a33;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --accent: #5eead4;
+    --accent-2: #7aa2f7;
+    --warn: #f59e0b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.55;
+  }
+  header {
+    border-bottom: 1px solid var(--border);
+    padding: 28px 48px;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+  .logo { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
+  .logo span { color: var(--accent); }
+  .tag { color: var(--muted); font-size: 14px; }
+  main { max-width: 1200px; margin: 0 auto; padding: 48px; }
+  h1 {
+    font-size: 44px;
+    line-height: 1.1;
+    margin: 0 0 16px;
+    letter-spacing: -0.02em;
+  }
+  h1 em { color: var(--accent); font-style: normal; }
+  .sub {
+    font-size: 18px;
+    color: var(--muted);
+    max-width: 720px;
+    margin-bottom: 48px;
+  }
+  section { margin-bottom: 64px; }
+  h2 {
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--muted);
+    margin: 0 0 20px;
+  }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+  }
+  .card h3 { margin: 0 0 8px; font-size: 18px; }
+  .card p { margin: 0; color: var(--muted); font-size: 14px; }
+  .tier {
+    border-left: 3px solid var(--accent);
+    padding-left: 16px;
+    margin-bottom: 20px;
+  }
+  .tier.t2 { border-left-color: var(--accent-2); }
+  .tier-label {
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .tier.t2 .tier-label { color: var(--accent-2); }
+
+  /* Demo */
+  .demo {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 32px;
+  }
+  .pipeline {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 12px;
+    align-items: stretch;
+    margin: 24px 0;
+  }
+  .stage {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 12px;
+    text-align: center;
+    font-size: 13px;
+    position: relative;
+    transition: all 0.3s ease;
+  }
+  .stage .icon { font-size: 22px; margin-bottom: 6px; display: block; }
+  .stage .label { font-weight: 600; }
+  .stage .detail { color: var(--muted); font-size: 11px; margin-top: 4px; }
+  .stage.active {
+    border-color: var(--accent);
+    background: rgba(94, 234, 212, 0.08);
+  }
+  .stage.done {
+    border-color: #2d4a3e;
+  }
+  .stage.done .icon::after { content: " ✓"; color: var(--accent); }
+
+  .controls {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  button.run {
+    background: var(--accent);
+    color: #0b0d10;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  button.run:hover { filter: brightness(1.1); }
+  button.run:disabled { opacity: 0.5; cursor: not-allowed; }
+  select {
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    padding: 9px 12px;
+    border-radius: 8px;
+    font-size: 14px;
+  }
+  .log {
+    background: #05080b;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    margin-top: 20px;
+    font-family: "SF Mono", Menlo, monospace;
+    font-size: 12px;
+    color: #a0b4c8;
+    min-height: 140px;
+    max-height: 200px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+  }
+  .log .ok { color: var(--accent); }
+  .log .warn { color: var(--warn); }
+  .log .info { color: var(--accent-2); }
+
+  .metrics {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-top: 20px;
+  }
+  .metric {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+  }
+  .metric .val { font-size: 24px; font-weight: 700; color: var(--accent); }
+  .metric .key { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-top: 4px; }
+
+  .viz-wrap {
+    margin-top: 24px;
+    background: #05080b;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    position: relative;
+  }
+  #viz { display: block; width: 100%; height: 420px; }
+  .viz-overlay {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    font-family: "SF Mono", Menlo, monospace;
+    font-size: 11px;
+    color: var(--muted);
+    background: rgba(5, 8, 11, 0.75);
+    border: 1px solid var(--border);
+    padding: 6px 10px;
+    border-radius: 6px;
+    pointer-events: none;
+  }
+  .viz-overlay .live { color: var(--accent); }
+  .viz-controls {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    display: flex;
+    gap: 6px;
+  }
+  .viz-controls button {
+    background: rgba(5, 8, 11, 0.75);
+    color: var(--text);
+    border: 1px solid var(--border);
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .viz-controls button:hover { border-color: var(--accent); }
+  .viz-controls button.active { border-color: var(--accent); color: var(--accent); }
+
+  .viz-gate {
+    position: absolute;
+    inset: 0;
+    background: rgba(5, 8, 11, 0.92);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    transition: opacity 0.4s ease;
+    z-index: 5;
+  }
+  .viz-gate.hidden { opacity: 0; pointer-events: none; }
+  .gate-icon { font-size: 40px; margin-bottom: 12px; }
+  .gate-title { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
+  .gate-sub { color: var(--muted); font-size: 13px; max-width: 320px; }
+
+  .upload {
+    border: 2px dashed var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 24px;
+    text-align: center;
+    transition: all 0.2s ease;
+    background: var(--panel-2);
+  }
+  .upload.dragging, .upload:hover {
+    border-color: var(--accent);
+    background: rgba(94, 234, 212, 0.04);
+  }
+  .upload h3 { margin: 0 0 4px; font-size: 16px; }
+  .upload p { margin: 0 0 16px; color: var(--muted); font-size: 13px; }
+  .upload-icon { font-size: 32px; margin-bottom: 8px; }
+  .photo-grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 10px;
+    margin-top: 16px;
+  }
+  .photo {
+    aspect-ratio: 1;
+    border-radius: 8px;
+    position: relative;
+    cursor: pointer;
+    overflow: hidden;
+    border: 2px solid transparent;
+    transition: all 0.2s ease;
+  }
+  .photo:hover { transform: translateY(-2px); border-color: var(--accent-2); }
+  .photo.selected { border-color: var(--accent); }
+  .photo.selected::after {
+    content: "✓";
+    position: absolute;
+    top: 4px;
+    right: 6px;
+    color: var(--accent);
+    font-weight: 700;
+    font-size: 14px;
+    background: rgba(5, 8, 11, 0.8);
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .photo svg { width: 100%; height: 100%; display: block; }
+  .photo .meta {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    background: linear-gradient(to top, rgba(0,0,0,0.8), transparent);
+    color: #fff;
+    font-size: 10px;
+    padding: 8px 6px 4px;
+    font-family: "SF Mono", Menlo, monospace;
+  }
+  .upload-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    margin-top: 16px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .upload-summary {
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .upload-summary b { color: var(--accent); }
+  button.secondary {
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+    padding: 10px 16px;
+    border-radius: 8px;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  button.secondary:hover { border-color: var(--accent); }
+
+  .progress {
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    margin-top: 14px;
+    overflow: hidden;
+    display: none;
+  }
+  .progress.on { display: block; }
+  .progress-bar {
+    height: 100%;
+    width: 0;
+    background: var(--accent);
+    transition: width 0.2s ease;
+  }
+
+  footer {
+    text-align: center;
+    color: var(--muted);
+    font-size: 12px;
+    padding: 32px;
+    border-top: 1px solid var(--border);
+  }
+
+  @media (max-width: 900px) {
+    .grid-2, .grid-3 { grid-template-columns: 1fr; }
+    .pipeline { grid-template-columns: repeat(2, 1fr); }
+    .metrics { grid-template-columns: repeat(2, 1fr); }
+    main, header { padding: 24px; }
+    h1 { font-size: 32px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">World<span>Scan</span></div>
+  <div class="tag">Prototype v0 · CS 194W</div>
+</header>
+
+<main>
+  <h1>Scan a room. <em>Train a robot.</em></h1>
+  <p class="sub">
+    WorldScan turns phone scans of real-world spaces into physics-ready RL environments for training robot foundation models.
+    Upload a Polycam scan, get a MuJoCo-compatible environment with collision meshes, material properties, and task definitions — in minutes, not weeks.
+  </p>
+
+  <section>
+    <h2>Two-Tier Product</h2>
+    <div class="grid-2">
+      <div class="card">
+        <div class="tier">
+          <div class="tier-label">Tier 1 · Navigation</div>
+        </div>
+        <h3>Whole-scene environments</h3>
+        <p>Raw scan processed as one static collision body. Robots navigate, avoid obstacles, and plan paths through real spatial layouts. Fast to produce.</p>
+      </div>
+      <div class="card">
+        <div class="tier t2">
+          <div class="tier-label">Tier 2 · Manipulation</div>
+        </div>
+        <h3>Object-level environments</h3>
+        <p>Scan segmented into individual objects via SAM 2, each reconstructed as a watertight mesh, ICP-aligned to LiDAR. Every object graspable and manipulable.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Live Pipeline Demo</h2>
+    <div class="demo">
+      <div class="upload" id="uploadZone">
+        <div class="upload-icon">📸</div>
+        <h3>Upload your scan</h3>
+        <p>Drag & drop a Polycam export, or pick from recent captures below</p>
+        <div class="photo-grid" id="photoGrid"></div>
+        <div class="upload-actions">
+          <button class="secondary" id="selectAll">Select all</button>
+          <button class="secondary" id="clearSel">Clear</button>
+          <span class="upload-summary" id="uploadSummary"><b>0</b> photos selected · 0 MB</span>
+          <button class="run" id="uploadBtn" disabled>⬆ Upload</button>
+        </div>
+        <div class="progress" id="uploadProgress"><div class="progress-bar" id="uploadBar"></div></div>
+      </div>
+
+      <div class="controls">
+        <select id="scanSelect">
+          <option value="lab">Stanford Robotics Lab (42 m²)</option>
+          <option value="kitchen">Residential Kitchen (18 m²)</option>
+          <option value="warehouse">Warehouse Aisle (120 m²)</option>
+        </select>
+        <select id="tierSelect">
+          <option value="1">Tier 1 — Navigation</option>
+          <option value="2">Tier 2 — Manipulation</option>
+        </select>
+        <button class="run" id="runBtn">▶ Run Pipeline</button>
+      </div>
+
+      <div class="pipeline" id="pipeline">
+        <div class="stage" data-stage="0"><span class="icon">📱</span><div class="label">Scan</div><div class="detail">Polycam .ply</div></div>
+        <div class="stage" data-stage="1"><span class="icon">🧹</span><div class="label">Preprocess</div><div class="detail">clean + align</div></div>
+        <div class="stage" data-stage="2"><span class="icon">🧊</span><div class="label">Decompose</div><div class="detail">V-HACD hulls</div></div>
+        <div class="stage" data-stage="3"><span class="icon">🎨</span><div class="label">Materials</div><div class="detail">CLIP lookup</div></div>
+        <div class="stage" data-stage="4"><span class="icon">🤖</span><div class="label">Export</div><div class="detail">MuJoCo MJCF</div></div>
+      </div>
+
+      <div class="log" id="log">Ready. Select a scan and click Run Pipeline.</div>
+
+      <div class="metrics" id="metrics" style="display:none">
+        <div class="metric"><div class="val" id="mTri">—</div><div class="key">Triangles</div></div>
+        <div class="metric"><div class="val" id="mHulls">—</div><div class="key">Convex hulls</div></div>
+        <div class="metric"><div class="val" id="mTime">—</div><div class="key">Scan → env</div></div>
+        <div class="metric"><div class="val" id="mGap">—</div><div class="key">Sim-to-real gap</div></div>
+      </div>
+
+      <div class="viz-wrap" id="vizWrap">
+        <canvas id="viz"></canvas>
+        <div class="viz-overlay" id="vizOverlay"><span class="live">●</span> MuJoCo preview — idle</div>
+        <div class="viz-controls">
+          <button id="viewRaw">Raw scan</button>
+          <button id="viewHulls" class="active">Collision hulls</button>
+          <button id="viewPolicy">Policy rollout</button>
+        </div>
+        <div class="viz-gate" id="vizGate">
+          <div class="gate-inner">
+            <div class="gate-icon">🔒</div>
+            <div class="gate-title">Visualization locked</div>
+            <div class="gate-sub">Upload photos and run the pipeline to render the environment</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Why WorldScan</h2>
+    <div class="grid-3">
+      <div class="card">
+        <h3>Real, not synthetic</h3>
+        <p>Every environment reconstructed from a real physical space. Policies transfer better than those trained on procedural generation.</p>
+      </div>
+      <div class="card">
+        <h3>Physics-ready, not visual</h3>
+        <p>Collision meshes, friction coefficients, semantic labels. Not a pretty render — a simulation-ready asset.</p>
+      </div>
+      <div class="card">
+        <h3>End-to-end RL infra</h3>
+        <p>Task definitions, reward functions, reset conditions, and evaluation metrics included. Load it and train.</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  WorldScan · CS 194W Spring 2026 · Team 3
+</footer>
+
+<script>
+  const scans = {
+    lab:       { name: "Stanford Robotics Lab", tri: 312000, hulls: 127, time: 28 },
+    kitchen:   { name: "Residential Kitchen",   tri: 198000, hulls: 84,  time: 19 },
+    warehouse: { name: "Warehouse Aisle",       tri: 540000, hulls: 186, time: 47 }
+  };
+
+  const stageLogs = [
+    { msg: (s) => `Loading ${s.name} (${(s.tri/1000).toFixed(0)}K triangles)...`, cls: "info" },
+    { msg: () => `Preprocessing: noise removal, RANSAC ground plane, scale verify...`, cls: "" },
+    { msg: (s) => `V-HACD convex decomposition → ${s.hulls} watertight hulls`, cls: "" },
+    { msg: () => `CLIP material classification → friction lookup table`, cls: "" },
+    { msg: () => `MJCF export: bodies, geoms, contacts, nav task definition`, cls: "ok" }
+  ];
+
+  const log = document.getElementById("log");
+  const stages = document.querySelectorAll(".stage");
+  const runBtn = document.getElementById("runBtn");
+  const scanSel = document.getElementById("scanSelect");
+  const tierSel = document.getElementById("tierSelect");
+  const metrics = document.getElementById("metrics");
+
+  function writeLog(text, cls = "") {
+    const line = document.createElement("div");
+    if (cls) line.className = cls;
+    line.textContent = `[${new Date().toLocaleTimeString()}] ${text}`;
+    log.appendChild(line);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function reset() {
+    log.innerHTML = "";
+    stages.forEach(s => s.classList.remove("active", "done"));
+    metrics.style.display = "none";
+  }
+
+  function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+  async function run() {
+    reset();
+    runBtn.disabled = true;
+    const scan = scans[scanSel.value];
+    const tier = tierSel.value;
+
+    writeLog(`Pipeline started · tier ${tier} · ${scan.name}`, "info");
+
+    for (let i = 0; i < stages.length; i++) {
+      stages[i].classList.add("active");
+      writeLog(stageLogs[i].msg(scan), stageLogs[i].cls);
+      await sleep(700 + Math.random() * 400);
+      stages[i].classList.remove("active");
+      stages[i].classList.add("done");
+    }
+
+    if (tier === "2") {
+      writeLog(`Tier 2: SAM 2 video tracking → per-object reconstruction → ICP alignment`, "info");
+      await sleep(800);
+      writeLog(`Reconstructed ${Math.floor(scan.hulls / 4)} manipulable objects`, "ok");
+    }
+
+    writeLog(`✓ Environment ready: ${scan.name.toLowerCase().replace(/\s/g, "_")}.xml`, "ok");
+    writeLog(`  Load in MuJoCo: mj_loadXML("${scan.name.toLowerCase().replace(/\s/g, "_")}.xml")`, "");
+
+    document.getElementById("mTri").textContent = (scan.tri / 1000).toFixed(0) + "K";
+    document.getElementById("mHulls").textContent = tier === "2" ? Math.floor(scan.hulls / 4) + " obj" : scan.hulls;
+    document.getElementById("mTime").textContent = scan.time + " min";
+    document.getElementById("mGap").textContent = "7 pp";
+    metrics.style.display = "grid";
+
+    runBtn.disabled = false;
+  }
+
+  runBtn.addEventListener("click", run);
+
+  /* ----------  Mock photo upload  ---------- */
+  const mockPhotos = [
+    { name: "IMG_0421.HEIC", mb: 3.2, hue: 200, angle: "wall N" },
+    { name: "IMG_0422.HEIC", mb: 3.4, hue: 180, angle: "wall E" },
+    { name: "IMG_0423.HEIC", mb: 3.1, hue: 220, angle: "corner" },
+    { name: "IMG_0424.HEIC", mb: 3.5, hue: 160, angle: "desk" },
+    { name: "IMG_0425.HEIC", mb: 3.3, hue: 30,  angle: "chair" },
+    { name: "IMG_0426.HEIC", mb: 3.6, hue: 260, angle: "shelf" },
+    { name: "IMG_0427.HEIC", mb: 3.2, hue: 140, angle: "floor" },
+    { name: "IMG_0428.HEIC", mb: 3.4, hue: 340, angle: "ceiling" },
+    { name: "IMG_0429.HEIC", mb: 3.1, hue: 80,  angle: "door" },
+    { name: "IMG_0430.HEIC", mb: 3.3, hue: 20,  angle: "window" },
+    { name: "IMG_0431.HEIC", mb: 3.5, hue: 280, angle: "wall W" },
+    { name: "IMG_0432.HEIC", mb: 3.2, hue: 100, angle: "wall S" }
+  ];
+  const selected = new Set();
+  const grid = document.getElementById("photoGrid");
+  const summary = document.getElementById("uploadSummary");
+  const uploadZone = document.getElementById("uploadZone");
+  const progress = document.getElementById("uploadProgress");
+  const bar = document.getElementById("uploadBar");
+
+  function photoThumbnail(p, idx) {
+    // Procedural room-ish thumbnail — colored gradient + geometric shapes
+    const c1 = `hsl(${p.hue}, 35%, 45%)`;
+    const c2 = `hsl(${p.hue}, 40%, 20%)`;
+    const c3 = `hsl(${(p.hue + 30) % 360}, 50%, 55%)`;
+    return `
+      <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice">
+        <defs>
+          <linearGradient id="g${idx}" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="${c1}"/>
+            <stop offset="1" stop-color="${c2}"/>
+          </linearGradient>
+        </defs>
+        <rect width="100" height="100" fill="url(#g${idx})"/>
+        <polygon points="0,70 100,55 100,100 0,100" fill="${c2}" opacity="0.6"/>
+        <rect x="${15 + (idx * 7) % 30}" y="${40 + (idx * 5) % 15}" width="${18 + idx % 10}" height="${25 + idx % 15}" fill="${c3}" opacity="0.75"/>
+        <circle cx="${70 + (idx * 3) % 15}" cy="${50 + (idx * 4) % 20}" r="${6 + idx % 5}" fill="${c1}" opacity="0.8"/>
+      </svg>
+      <div class="meta">${p.angle}</div>
+    `;
+  }
+
+  function renderPhotos() {
+    grid.innerHTML = "";
+    mockPhotos.forEach((p, i) => {
+      const el = document.createElement("div");
+      el.className = "photo" + (selected.has(i) ? " selected" : "");
+      el.innerHTML = photoThumbnail(p, i);
+      el.title = `${p.name} · ${p.mb.toFixed(1)} MB`;
+      el.addEventListener("click", () => {
+        if (selected.has(i)) selected.delete(i); else selected.add(i);
+        renderPhotos();
+        updateSummary();
+      });
+      grid.appendChild(el);
+    });
+  }
+
+  const uploadBtn = document.getElementById("uploadBtn");
+  let uploaded = false;
+
+  function updateSummary() {
+    const count = selected.size;
+    const mb = [...selected].reduce((s, i) => s + mockPhotos[i].mb, 0);
+    summary.innerHTML = `<b>${count}</b> photo${count === 1 ? "" : "s"} selected · ${mb.toFixed(1)} MB`;
+    uploadBtn.disabled = count === 0;
+    runBtn.disabled = !uploaded;
+  }
+
+  document.getElementById("selectAll").addEventListener("click", () => {
+    mockPhotos.forEach((_, i) => selected.add(i));
+    renderPhotos(); updateSummary();
+  });
+  document.getElementById("clearSel").addEventListener("click", () => {
+    selected.clear(); renderPhotos(); updateSummary();
+  });
+
+  // drag & drop (cosmetic — no actual read)
+  ["dragenter", "dragover"].forEach(ev => uploadZone.addEventListener(ev, e => {
+    e.preventDefault(); uploadZone.classList.add("dragging");
+  }));
+  ["dragleave", "drop"].forEach(ev => uploadZone.addEventListener(ev, e => {
+    e.preventDefault(); uploadZone.classList.remove("dragging");
+  }));
+  uploadZone.addEventListener("drop", () => {
+    mockPhotos.forEach((_, i) => selected.add(i));
+    renderPhotos(); updateSummary();
+    writeLog(`Dropped ${mockPhotos.length} photos · auto-selected all`, "info");
+  });
+
+  async function fakeUpload() {
+    progress.classList.add("on");
+    bar.style.width = "0%";
+    const total = selected.size;
+    for (let i = 1; i <= total; i++) {
+      await sleep(80 + Math.random() * 120);
+      bar.style.width = (i / total * 100) + "%";
+      writeLog(`Uploaded ${i}/${total} · ${[...selected][i - 1] !== undefined ? mockPhotos[[...selected][i - 1]].name : ""}`, "");
+    }
+    await sleep(200);
+    progress.classList.remove("on");
+  }
+
+  renderPhotos();
+  updateSummary();
+
+  /* ----------  3D Visualization  ---------- */
+  const THREE_URL = "https://unpkg.com/three@0.160.0/build/three.module.js";
+  let scene, camera, renderer, robot, robotTarget, pathLine, pathPoints, pathIdx;
+  let rawGroup, hullGroup, policyGroup;
+  let viewMode = "hulls";
+  let animating = false;
+  const overlay = document.getElementById("vizOverlay");
+
+  import(THREE_URL).then((THREE) => {
+    const canvas = document.getElementById("viz");
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x05080b);
+    scene.fog = new THREE.Fog(0x05080b, 18, 32);
+
+    camera = new THREE.PerspectiveCamera(50, w / h, 0.1, 100);
+    camera.position.set(8, 7, 10);
+    camera.lookAt(0, 0, 0);
+
+    renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setSize(w, h, false);
+
+    const ambient = new THREE.AmbientLight(0xffffff, 0.5);
+    scene.add(ambient);
+    const key = new THREE.DirectionalLight(0xffffff, 0.9);
+    key.position.set(6, 10, 4);
+    scene.add(key);
+    const rim = new THREE.DirectionalLight(0x7aa2f7, 0.4);
+    rim.position.set(-6, 4, -4);
+    scene.add(rim);
+
+    // grid
+    const grid = new THREE.GridHelper(20, 20, 0x1e2730, 0x12181f);
+    scene.add(grid);
+
+    // --- scene geometry: a mock "scanned" room ---
+    const room = buildRoom(THREE);
+    scene.add(room.raw);
+    scene.add(room.tier1Hulls);
+    scene.add(room.tier2Hulls);
+    rawGroup = room.raw;
+
+    // robot
+    const robotGeom = new THREE.CapsuleGeometry(0.28, 0.4, 4, 8);
+    const robotMat = new THREE.MeshStandardMaterial({ color: 0x5eead4, emissive: 0x0b3d35, roughness: 0.4 });
+    robot = new THREE.Mesh(robotGeom, robotMat);
+    robot.position.set(-4, 0.5, -3.5);
+    scene.add(robot);
+
+    // target
+    const tgtGeom = new THREE.RingGeometry(0.3, 0.45, 24);
+    const tgtMat = new THREE.MeshBasicMaterial({ color: 0xf59e0b, side: THREE.DoubleSide });
+    robotTarget = new THREE.Mesh(tgtGeom, tgtMat);
+    robotTarget.rotation.x = -Math.PI / 2;
+    robotTarget.position.set(4, 0.02, 3.5);
+    scene.add(robotTarget);
+
+    // policy path
+    pathPoints = [
+      new THREE.Vector3(-4, 0.5, -3.5),
+      new THREE.Vector3(-2, 0.5, -2.2),
+      new THREE.Vector3(-1, 0.5, 0),
+      new THREE.Vector3(0.5, 0.5, 1.2),
+      new THREE.Vector3(2.5, 0.5, 2.2),
+      new THREE.Vector3(4, 0.5, 3.5)
+    ];
+    const curve = new THREE.CatmullRomCurve3(pathPoints);
+    const curvePts = curve.getPoints(80);
+    const lineGeom = new THREE.BufferGeometry().setFromPoints(curvePts);
+    const lineMat = new THREE.LineBasicMaterial({ color: 0x7aa2f7, transparent: true, opacity: 0.6 });
+    pathLine = new THREE.Line(lineGeom, lineMat);
+    scene.add(pathLine);
+    window._curve = curve;
+    pathIdx = 0;
+
+    applyView();
+    animate();
+
+    window.addEventListener("resize", () => {
+      const nw = canvas.clientWidth, nh = canvas.clientHeight;
+      camera.aspect = nw / nh;
+      camera.updateProjectionMatrix();
+      renderer.setSize(nw, nh, false);
+    });
+  });
+
+  let tier1Hulls, tier2Hulls, tier2Objects = [], gripper;
+
+  function makeLabelSprite(THREE, text, color = "#5eead4") {
+    const canvas = document.createElement("canvas");
+    canvas.width = 256; canvas.height = 64;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "rgba(5,8,11,0.85)";
+    ctx.fillRect(0, 0, 256, 64);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 3;
+    ctx.strokeRect(2, 2, 252, 60);
+    ctx.fillStyle = color;
+    ctx.font = "bold 28px -apple-system, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(text, 128, 32);
+    const tex = new THREE.CanvasTexture(canvas);
+    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
+    const sprite = new THREE.Sprite(mat);
+    sprite.scale.set(1.2, 0.3, 1);
+    return sprite;
+  }
+
+  const FURN = [
+    { name: "table",  geom: [1.6, 0.9, 1.2], pos: [-2, 0.45, 2],   color: 0x7aa2f7 },
+    { name: "chair",  geom: [0.9, 0.8, 0.9], pos: [2.5, 0.4, -2],  color: 0xf59e0b },
+    { name: "shelf",  geom: [1.4, 1.8, 0.6], pos: [0, 0.9, -3.5],  color: 0xc678dd },
+    { name: "box",    geom: [0.8, 0.5, 0.8], pos: [3.5, 0.25, 1.5], color: 0xe06c75 }
+  ];
+
+  function buildRoom(THREE) {
+    // Raw: dense "scan-like" point cloud
+    const raw = new THREE.Group();
+    const ptGeom = new THREE.BufferGeometry();
+    const positions = [];
+    const colors = [];
+    const addPt = (x, y, z, c) => { positions.push(x, y, z); colors.push(c[0], c[1], c[2]); };
+    for (let i = 0; i < 2500; i++) {
+      const face = Math.floor(Math.random() * 5);
+      const u = (Math.random() - 0.5) * 12;
+      const v = Math.random() * 3;
+      const w = (Math.random() - 0.5) * 10;
+      const c = [0.36, 0.92, 0.83];
+      if (face === 0) addPt(-6, v, w, c);
+      else if (face === 1) addPt(6, v, w, c);
+      else if (face === 2) addPt(u, v, -5, c);
+      else if (face === 3) addPt(u, v, 5, c);
+      else addPt(u, 0, w, [0.18, 0.22, 0.28]);
+    }
+    const clusters = [
+      { x: -2, z: 2, r: 0.9, h: 1.2, c: [0.48, 0.64, 0.97] },
+      { x: 2.5, z: -2, r: 0.6, h: 0.8, c: [0.95, 0.62, 0.28] },
+      { x: 0, z: -3.2, r: 0.7, h: 1.5, c: [0.78, 0.46, 0.87] },
+      { x: 3.5, z: 1.5, r: 0.5, h: 0.6, c: [0.87, 0.42, 0.45] }
+    ];
+    for (const cl of clusters) {
+      for (let i = 0; i < 600; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const rr = cl.r * (0.6 + Math.random() * 0.5);
+        addPt(cl.x + Math.cos(a) * rr, Math.random() * cl.h, cl.z + Math.sin(a) * rr, cl.c);
+      }
+    }
+    ptGeom.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    ptGeom.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+    const ptMat = new THREE.PointsMaterial({ size: 0.04, vertexColors: true, transparent: true, opacity: 0.85 });
+    raw.add(new THREE.Points(ptGeom, ptMat));
+
+    // Shared shell (floor + walls)
+    const shell = new THREE.Group();
+    const floorMat = new THREE.MeshStandardMaterial({ color: 0x161c24, roughness: 1 });
+    const wallMat = new THREE.MeshStandardMaterial({ color: 0x2a3340, roughness: 0.9, transparent: true, opacity: 0.55 });
+    const floorMesh = new THREE.Mesh(new THREE.BoxGeometry(12, 0.05, 10), floorMat);
+    floorMesh.position.set(0, -0.025, 0);
+    shell.add(floorMesh);
+    const walls = [
+      [12, 3, 0.1,  0, 1.5, -5],
+      [12, 3, 0.1,  0, 1.5,  5],
+      [0.1, 3, 10, -6, 1.5, 0],
+      [0.1, 3, 10,  6, 1.5, 0]
+    ];
+    for (const [sx, sy, sz, x, y, z] of walls) {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), wallMat);
+      m.position.set(x, y, z);
+      shell.add(m);
+    }
+
+    // ---- TIER 1: everything fused, one color, one label ----
+    tier1Hulls = new THREE.Group();
+    tier1Hulls.add(shell.clone());
+    const t1Mat = new THREE.MeshStandardMaterial({ color: 0x5eead4, roughness: 0.5, transparent: true, opacity: 0.55 });
+    const t1EdgeMat = new THREE.LineBasicMaterial({ color: 0x5eead4, transparent: true, opacity: 0.9 });
+    for (const f of FURN) {
+      const g = new THREE.BoxGeometry(...f.geom);
+      const m = new THREE.Mesh(g, t1Mat);
+      m.position.set(...f.pos);
+      tier1Hulls.add(m);
+      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(g), t1EdgeMat);
+      edges.position.set(...f.pos);
+      tier1Hulls.add(edges);
+    }
+    // dashed lines between furniture to signal "fused into one body"
+    const fuseMat = new THREE.LineDashedMaterial({ color: 0x5eead4, dashSize: 0.15, gapSize: 0.1, transparent: true, opacity: 0.6 });
+    for (let i = 0; i < FURN.length; i++) {
+      for (let j = i + 1; j < FURN.length; j++) {
+        const a = new THREE.Vector3(...FURN[i].pos);
+        const b = new THREE.Vector3(...FURN[j].pos);
+        const lg = new THREE.BufferGeometry().setFromPoints([a, b]);
+        const ln = new THREE.Line(lg, fuseMat);
+        ln.computeLineDistances();
+        tier1Hulls.add(ln);
+      }
+    }
+    const t1Label = makeLabelSprite(THREE, "1 STATIC BODY", "#5eead4");
+    t1Label.position.set(0, 3.2, 0);
+    t1Label.scale.set(2, 0.5, 1);
+    tier1Hulls.add(t1Label);
+
+    // ---- TIER 2: each object its own color + label, independently posed ----
+    tier2Hulls = new THREE.Group();
+    tier2Hulls.add(shell.clone());
+    tier2Objects = [];
+    for (const f of FURN) {
+      const g = new THREE.BoxGeometry(...f.geom);
+      const objGroup = new THREE.Group();
+      const mat = new THREE.MeshStandardMaterial({ color: f.color, roughness: 0.5, transparent: true, opacity: 0.85 });
+      const mesh = new THREE.Mesh(g, mat);
+      objGroup.add(mesh);
+      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(g), new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.4 }));
+      objGroup.add(edges);
+      const label = makeLabelSprite(THREE, f.name.toUpperCase(), "#" + f.color.toString(16).padStart(6, "0"));
+      label.position.y = f.geom[1] / 2 + 0.5;
+      objGroup.add(label);
+      objGroup.position.set(...f.pos);
+      objGroup.userData.basePos = [...f.pos];
+      objGroup.userData.name = f.name;
+      tier2Hulls.add(objGroup);
+      tier2Objects.push(objGroup);
+    }
+
+    // gripper (two pincer boxes) for Tier 2 policy
+    gripper = new THREE.Group();
+    const pincerMat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.3 });
+    const base = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.15, 0.5), pincerMat);
+    base.position.y = 0.3;
+    gripper.add(base);
+    const stem = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.5, 0.1), pincerMat);
+    stem.position.y = 1.1;
+    gripper.add(stem);
+    const p1 = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.3, 0.08), pincerMat);
+    p1.position.set(-0.15, 0.1, 0);
+    gripper.add(p1);
+    const p2 = p1.clone();
+    p2.position.x = 0.15;
+    gripper.add(p2);
+    gripper.visible = false;
+    scene.add(gripper);
+
+    return { raw, tier1Hulls, tier2Hulls };
+  }
+
+  function applyView() {
+    if (!rawGroup) return;
+    const tier = tierSel.value; // "1" or "2"
+    rawGroup.visible = viewMode === "raw";
+    tier1Hulls.visible = tier === "1" && (viewMode === "hulls" || viewMode === "policy");
+    tier2Hulls.visible = tier === "2" && (viewMode === "hulls" || viewMode === "policy");
+    pathLine.visible = viewMode === "policy" && tier === "1";
+    robot.visible = viewMode === "policy" && tier === "1";
+    robotTarget.visible = viewMode === "policy" && tier === "1";
+    if (gripper) gripper.visible = viewMode === "policy" && tier === "2";
+
+    document.querySelectorAll(".viz-controls button").forEach(b => b.classList.remove("active"));
+    const map = { raw: "viewRaw", hulls: "viewHulls", policy: "viewPolicy" };
+    document.getElementById(map[viewMode]).classList.add("active");
+
+    const labels = {
+      raw: "Raw scan · 312K points",
+      hulls: tier === "1"
+        ? "Tier 1 · one static collision body (navigation)"
+        : "Tier 2 · 4 independent object bodies (manipulation)",
+      policy: tier === "1"
+        ? "Policy rollout · navigation around fused geometry"
+        : "Policy rollout · pick-and-place on isolated object"
+    };
+    overlay.innerHTML = `<span class="live">●</span> ${labels[viewMode]}`;
+  }
+
+  function animate() {
+    requestAnimationFrame(animate);
+    if (!scene) return;
+
+    // slow orbit
+    const t = performance.now() * 0.0002;
+    camera.position.x = Math.cos(t) * 12;
+    camera.position.z = Math.sin(t) * 12;
+    camera.position.y = 7;
+    camera.lookAt(0, 0.5, 0);
+
+    const tier = tierSel.value;
+
+    // Tier 1 navigation policy — capsule follows spline
+    if (viewMode === "policy" && tier === "1" && window._curve) {
+      pathIdx = (pathIdx + 0.0025) % 1;
+      const p = window._curve.getPoint(pathIdx);
+      robot.position.copy(p);
+      const next = window._curve.getPoint((pathIdx + 0.01) % 1);
+      robot.lookAt(next.x, p.y, next.z);
+      robotTarget.material.opacity = 0.6 + Math.sin(performance.now() * 0.005) * 0.4;
+    }
+
+    // Tier 2 manipulation policy — gripper picks up the "box", drops it, repeats
+    if (viewMode === "policy" && tier === "2" && gripper && tier2Objects.length) {
+      const box = tier2Objects[3]; // "box"
+      const base = box.userData.basePos;
+      const t2 = (performance.now() * 0.0006) % 1;
+      // phases: approach -> grasp -> lift -> move -> place -> return
+      const phase = t2 * 6;
+      let gx = base[0], gy = 2.5, gz = base[2];
+      let bx = base[0], by = base[1], bz = base[2];
+      if (phase < 1) { // approach from above
+        gy = 2.5 - phase * 1.8;
+      } else if (phase < 2) { // grasp + lift
+        gy = 0.7 + (phase - 1) * 1.5;
+        by = base[1] + (phase - 1) * 1.5;
+      } else if (phase < 3) { // move
+        const k = phase - 2;
+        gx = base[0] + k * -3; bx = gx;
+        gy = 2.2; by = base[1] + 1.5;
+        gz = base[2] + k * 0.5; bz = gz;
+      } else if (phase < 4) { // place
+        gy = 2.2 - (phase - 3) * 1.5;
+        by = (base[1] + 1.5) - (phase - 3) * 1.5;
+        gx = base[0] - 3; bx = gx;
+        gz = base[2] + 0.5; bz = gz;
+      } else if (phase < 5) { // retract
+        gy = 0.7 + (phase - 4) * 1.8;
+        bx = base[0] - 3; by = base[1]; bz = base[2] + 0.5;
+      } else { // reset box back for looping
+        const k = phase - 5;
+        bx = base[0] - 3 + k * 3;
+        by = base[1];
+        bz = base[2] + 0.5 - k * 0.5;
+        gx = bx; gy = 2.5; gz = bz;
+      }
+      gripper.position.set(gx, gy, gz);
+      box.position.set(bx, by, bz);
+    } else if (tier2Objects.length && tier === "2") {
+      // reset positions when not in policy
+      for (const o of tier2Objects) o.position.set(...o.userData.basePos);
+    }
+
+    renderer.render(scene, camera);
+  }
+
+  document.getElementById("viewRaw").addEventListener("click", () => { viewMode = "raw"; applyView(); });
+  document.getElementById("viewHulls").addEventListener("click", () => { viewMode = "hulls"; applyView(); });
+  document.getElementById("viewPolicy").addEventListener("click", () => { viewMode = "policy"; applyView(); });
+  tierSel.addEventListener("change", () => applyView());
+
+  uploadBtn.addEventListener("click", async () => {
+    if (selected.size === 0) return;
+    uploadBtn.disabled = true;
+    reset();
+    writeLog(`Uploading ${selected.size} photos to WorldScan...`, "info");
+    await fakeUpload();
+    writeLog(`Stitching photos → point cloud via Polycam SDK`, "");
+    await sleep(400);
+    writeLog(`✓ Upload complete. Ready to process.`, "ok");
+    uploaded = true;
+    uploadBtn.textContent = "✓ Uploaded";
+    runBtn.disabled = false;
+    runBtn.focus();
+  });
+
+  // reveal viz only after pipeline completes
+  const vizGate = document.getElementById("vizGate");
+  const origRun = run;
+  window.run = async function() {
+    if (!uploaded) return;
+    vizGate.classList.remove("hidden"); // re-lock during processing
+    await origRun();
+    vizGate.classList.add("hidden");
+    viewMode = "raw"; applyView();
+    setTimeout(() => { viewMode = "hulls"; applyView(); }, 1200);
+    setTimeout(() => { viewMode = "policy"; applyView(); }, 2800);
+  };
+  runBtn.removeEventListener("click", run);
+  runBtn.addEventListener("click", () => window.run());
+</script>
+</body>
+</html>
