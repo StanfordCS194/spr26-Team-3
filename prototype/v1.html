@@ -282,6 +282,55 @@
       </div>
 
       <div class="panel-section">
+        <h3>RL Env <span id="rl-server-state" style="font-size:10px; color:var(--muted); font-weight:normal;">(checking…)</span></h3>
+        <div class="row">
+          <label>Up axis</label>
+          <select id="rl-up">
+            <option value="auto">auto</option>
+            <option value="y" selected>y</option>
+            <option value="z">z</option>
+          </select>
+        </div>
+        <div class="row">
+          <label>Diag (m)</label>
+          <input type="number" id="rl-diag" value="6" step="0.5" min="0" style="background:var(--panel-2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-size:12px;width:80px;" />
+        </div>
+        <button class="btn primary" id="btn-rl-build" disabled style="margin-top:8px;">Build RL env</button>
+        <div class="progress" id="rl-build-progress"><div class="progress-bar" id="rl-build-progress-bar"></div></div>
+        <div id="rl-build-result" style="font-size:11px; color:var(--muted); margin-top:8px; line-height:1.6;"></div>
+
+        <div style="margin-top:14px;">
+          <div class="row">
+            <label>Train steps</label>
+            <input type="number" id="rl-train-steps" value="100000" min="10000" max="2000000" step="10000" style="background:var(--panel-2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-size:12px;width:90px;" />
+          </div>
+          <button class="btn" id="btn-rl-train" disabled style="margin-top:8px;">Train PPO</button>
+          <div id="rl-train-result" style="font-size:11px; color:var(--muted); margin-top:8px; line-height:1.6;"></div>
+        </div>
+
+        <div style="margin-top:14px;">
+          <div class="row">
+            <label>Policy</label>
+            <select id="rl-policy">
+              <option value="greedy" selected>greedy</option>
+              <option value="random">random</option>
+              <option value="ppo">ppo (trained)</option>
+            </select>
+          </div>
+          <div class="row">
+            <label>Episodes</label>
+            <input type="number" id="rl-episodes" value="5" min="1" max="50" style="background:var(--panel-2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-size:12px;width:60px;" />
+          </div>
+          <div class="row">
+            <label>Max steps</label>
+            <input type="number" id="rl-steps" value="300" min="50" max="2000" step="50" style="background:var(--panel-2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-size:12px;width:80px;" />
+          </div>
+          <button class="btn" id="btn-rl-run" disabled style="margin-top:8px;">Run rollout</button>
+          <div id="rl-run-result" style="font-size:11px; color:var(--muted); margin-top:8px; line-height:1.5; max-height:160px; overflow-y:auto;"></div>
+        </div>
+      </div>
+
+      <div class="panel-section">
         <h3>Stats</h3>
         <div class="stats">
           <div>vertices: <span class="k" id="stat-verts">—</span></div>
@@ -536,6 +585,7 @@ $('btn-reconstruct').onclick = async () => {
 
     $('btn-export-ply').disabled = false;
     $('btn-export-obj').disabled = false;
+    $('btn-rl-build').disabled = !rlServerOnline;
     setStatus('Done.', 'ok');
   } catch (e) {
     console.error(e);
@@ -669,6 +719,178 @@ $('btn-export-obj').onclick = () => {
   for (let i = 0; i < nf; i++) lines.push(`f ${indices[i*3]+1} ${indices[i*3+1]+1} ${indices[i*3+2]+1}`);
   download(new Blob([lines.join('\n')], { type: 'text/plain' }), 'worldscan.obj');
 };
+
+// ---------- RL Env: in-browser build + rollout via local server ----------
+let rlServerOnline = false;
+let rlBuildId = null;
+
+function reconstructionToOBJBlob(recon) {
+  const { positions, indices } = recon;
+  const nv = positions.length / 3, nf = indices.length / 3;
+  const lines = [];
+  for (let i = 0; i < nv; i++) {
+    lines.push(`v ${positions[i*3].toFixed(4)} ${positions[i*3+1].toFixed(4)} ${positions[i*3+2].toFixed(4)}`);
+  }
+  for (let i = 0; i < nf; i++) lines.push(`f ${indices[i*3]+1} ${indices[i*3+1]+1} ${indices[i*3+2]+1}`);
+  return new Blob([lines.join('\n')], { type: 'text/plain' });
+}
+
+async function checkRlServer() {
+  const stateEl = $('rl-server-state');
+  try {
+    const res = await fetch('/api/builds', { method: 'GET' });
+    if (res.ok) {
+      rlServerOnline = true;
+      stateEl.textContent = '(online)';
+      stateEl.style.color = 'var(--accent)';
+      $('btn-rl-build').disabled = !lastReconstruction;
+      return;
+    }
+    throw new Error('non-200');
+  } catch (e) {
+    rlServerOnline = false;
+    stateEl.textContent = '(offline — run `python -m rl_env serve`)';
+    stateEl.style.color = 'var(--warn)';
+    $('btn-rl-build').disabled = true;
+    $('btn-rl-run').disabled = true;
+  }
+}
+
+$('btn-rl-build').onclick = async () => {
+  if (!lastReconstruction || !rlServerOnline) return;
+  const btn = $('btn-rl-build');
+  const resultEl = $('rl-build-result');
+  const progress = $('rl-build-progress');
+  const bar = $('rl-build-progress-bar');
+  btn.disabled = true;
+  resultEl.textContent = '';
+  progress.classList.add('show');
+  bar.style.width = '20%';
+  setStatus('Building RL env…', 'busy');
+
+  try {
+    const blob = reconstructionToOBJBlob(lastReconstruction);
+    const fd = new FormData();
+    fd.append('mesh', blob, 'reconstruction.obj');
+    fd.append('up', $('rl-up').value);
+    fd.append('diag', $('rl-diag').value);
+    bar.style.width = '60%';
+    const res = await fetch('/api/build', { method: 'POST', body: fd });
+    bar.style.width = '95%';
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    rlBuildId = data.build_id;
+    resultEl.innerHTML = `
+      <div>build_id: <code>${data.build_id}</code></div>
+      <div>hulls: ${data.n_hulls} · floor_z: ${data.floor_z.toFixed(2)}</div>
+      <div>bounds: [${data.bounds_min.map(v=>v.toFixed(1)).join(', ')}] → [${data.bounds_max.map(v=>v.toFixed(1)).join(', ')}]</div>
+      <div>spawn: [${data.spawn_region.map(v=>v.toFixed(1)).join(', ')}] · ${data.elapsed_s}s</div>
+    `;
+    bar.style.width = '100%';
+    setStatus('RL env built.', 'ok');
+    $('btn-rl-run').disabled = false;
+    $('btn-rl-train').disabled = false;
+    rlPpoTrained = false;
+    $('rl-train-result').textContent = '';
+  } catch (e) {
+    console.error(e);
+    resultEl.innerHTML = `<span style="color:var(--err);">build failed: ${e.message}</span>`;
+    setStatus(`Build failed: ${e.message}`, 'err');
+  } finally {
+    btn.disabled = !lastReconstruction;
+    setTimeout(() => progress.classList.remove('show'), 600);
+  }
+};
+
+let rlPpoTrained = false;
+
+$('btn-rl-train').onclick = async () => {
+  if (!rlBuildId || !rlServerOnline) return;
+  const btn = $('btn-rl-train');
+  const resultEl = $('rl-train-result');
+  const steps = parseInt($('rl-train-steps').value, 10);
+  btn.disabled = true;
+  resultEl.innerHTML = `<div>training PPO for ${steps.toLocaleString()} steps… (~${Math.max(5, Math.round(steps / 6000))}s on CPU)</div>`;
+  setStatus('Training PPO…', 'busy');
+
+  try {
+    const t0 = performance.now();
+    const res = await fetch('/api/train', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        build_id: rlBuildId,
+        steps,
+        n_envs: 4,
+        max_steps: 300,
+        seed: 0,
+        device: 'cpu',
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    const wall = ((performance.now() - t0) / 1000).toFixed(1);
+    rlPpoTrained = true;
+    resultEl.innerHTML = `
+      <div style="color:var(--text); font-weight:600;">trained ${data.steps.toLocaleString()} steps</div>
+      <div>${data.elapsed_s}s · ${data.fps.toLocaleString()} steps/s · wall ${wall}s</div>
+      <div>switch Policy → <code>ppo</code> to evaluate</div>
+    `;
+    $('rl-policy').value = 'ppo';
+    setStatus('PPO trained.', 'ok');
+  } catch (e) {
+    console.error(e);
+    resultEl.innerHTML = `<span style="color:var(--err);">train failed: ${e.message}</span>`;
+    setStatus(`Train failed: ${e.message}`, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+};
+
+$('btn-rl-run').onclick = async () => {
+  if (!rlBuildId || !rlServerOnline) return;
+  const btn = $('btn-rl-run');
+  const resultEl = $('rl-run-result');
+  btn.disabled = true;
+  resultEl.innerHTML = '<div>running…</div>';
+  setStatus('Running rollout…', 'busy');
+
+  try {
+    const payload = {
+      build_id: rlBuildId,
+      policy: $('rl-policy').value,
+      episodes: parseInt($('rl-episodes').value, 10),
+      steps: parseInt($('rl-steps').value, 10),
+      seed: 0,
+    };
+    const res = await fetch('/api/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+
+    const rows = data.episodes.map((e, i) =>
+      `<div>ep ${i+1}: ${e.steps} steps · r=${e.reward.toFixed(1)} · d=${e.distance.toFixed(2)} · ${e.success ? '<span style="color:var(--accent);">✓</span>' : '<span style="color:var(--err);">✗</span>'}</div>`
+    ).join('');
+    resultEl.innerHTML = `
+      <div style="color:var(--text); font-weight:600; margin-bottom:4px;">
+        ${data.policy}: ${data.successes}/${data.n_episodes} success · avg r=${data.avg_reward.toFixed(1)} · ${data.elapsed_s}s
+      </div>
+      ${rows}
+    `;
+    setStatus(`Rollout done: ${data.successes}/${data.n_episodes} success.`, 'ok');
+  } catch (e) {
+    console.error(e);
+    resultEl.innerHTML = `<span style="color:var(--err);">run failed: ${e.message}</span>`;
+    setStatus(`Run failed: ${e.message}`, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+};
+
+checkRlServer();
 
 function download(blob, name) {
   const url = URL.createObjectURL(blob);

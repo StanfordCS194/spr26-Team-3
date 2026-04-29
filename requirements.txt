@@ -1,0 +1,7 @@
+mujoco>=3.2
+trimesh>=4.4
+numpy>=1.26
+gymnasium>=0.29
+flask>=3.0
+stable-baselines3>=2.3
+torch>=2.2
