@@ -375,7 +375,9 @@
             <input type="number" id="rl-steps" value="300" min="50" max="2000" step="50" style="background:var(--panel-2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-size:12px;width:80px;" />
           </div>
           <button class="btn" id="btn-rl-run" disabled style="margin-top:8px;">Run rollout</button>
+          <button class="btn" id="btn-rl-benchmark" disabled style="margin-top:8px;">Benchmark policies</button>
           <div id="rl-run-result" style="font-size:11px; color:var(--muted); margin-top:8px; line-height:1.5; max-height:160px; overflow-y:auto;"></div>
+          <div id="rl-benchmark-result" style="font-size:11px; color:var(--muted); margin-top:8px; line-height:1.5; max-height:220px; overflow-y:auto;"></div>
           <div class="replay" id="rl-replay" style="display:none;">
             <div class="replay-head">
               <span id="rl-replay-title">Replay</span>
@@ -818,6 +820,7 @@ async function checkRlServer() {
     stateEl.style.color = 'var(--warn)';
     $('btn-rl-build').disabled = true;
     $('btn-rl-run').disabled = true;
+    $('btn-rl-benchmark').disabled = true;
   }
 }
 
@@ -984,9 +987,11 @@ $('btn-rl-build').onclick = async () => {
     bar.style.width = '100%';
     setStatus('RL env built.', 'ok');
     $('btn-rl-run').disabled = false;
+    $('btn-rl-benchmark').disabled = false;
     $('btn-rl-train').disabled = false;
     rlPpoTrained = false;
     $('rl-train-result').textContent = '';
+    $('rl-benchmark-result').textContent = '';
     loadReplay(null);
   } catch (e) {
     console.error(e);
@@ -1046,6 +1051,21 @@ $('btn-rl-train').onclick = async () => {
   }
 };
 
+function summarizeRollout(episodes, policyName) {
+  const n = Math.max(episodes.length, 1);
+  const successes = episodes.filter((e) => e.success).length;
+  const avgReward = episodes.reduce((s, e) => s + e.reward, 0) / n;
+  const avgDistance = episodes.reduce((s, e) => s + e.distance, 0) / n;
+  const avgSteps = episodes.reduce((s, e) => s + e.steps, 0) / n;
+  return {
+    policy: policyName,
+    successRate: `${successes}/${episodes.length}`,
+    avgReward,
+    avgDistance,
+    avgSteps,
+  };
+}
+
 $('btn-rl-run').onclick = async () => {
   if (!rlBuildId || !rlServerOnline) return;
   const btn = $('btn-rl-run');
@@ -1088,6 +1108,88 @@ $('btn-rl-run').onclick = async () => {
     resultEl.innerHTML = `<span style="color:var(--err);">run failed: ${e.message}</span>`;
     loadReplay(null);
     setStatus(`Run failed: ${e.message}`, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+};
+
+$('btn-rl-benchmark').onclick = async () => {
+  if (!rlBuildId || !rlServerOnline) return;
+  const btn = $('btn-rl-benchmark');
+  const resultEl = $('rl-benchmark-result');
+  const episodes = parseInt($('rl-episodes').value, 10);
+  const steps = parseInt($('rl-steps').value, 10);
+  btn.disabled = true;
+  resultEl.innerHTML = '<div>benchmark running…</div>';
+  setStatus('Benchmarking policies…', 'busy');
+
+  const runPolicy = async (policy) => {
+    const res = await fetch('/api/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        build_id: rlBuildId,
+        policy,
+        episodes,
+        steps,
+        seed: 0,
+        include_trace: false,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `${policy}: HTTP ${res.status}`);
+    return data;
+  };
+
+  try {
+    const outputs = [];
+    outputs.push(await runPolicy('random'));
+    outputs.push(await runPolicy('greedy'));
+    try {
+      outputs.push(await runPolicy('ppo'));
+    } catch (e) {
+      outputs.push({
+        policy: 'ppo',
+        skipped: true,
+        reason: e.message,
+        episodes: [],
+      });
+    }
+
+    const rows = outputs.map((o) => {
+      if (o.skipped) {
+        return `<tr><td>${o.policy}</td><td colspan="4" style="color:var(--warn);">skipped (${o.reason})</td></tr>`;
+      }
+      const s = summarizeRollout(o.episodes, o.policy);
+      return `<tr>
+        <td>${s.policy}</td>
+        <td>${s.successRate}</td>
+        <td>${s.avgReward.toFixed(2)}</td>
+        <td>${s.avgDistance.toFixed(2)}</td>
+        <td>${s.avgSteps.toFixed(1)}</td>
+      </tr>`;
+    }).join('');
+
+    resultEl.innerHTML = `
+      <div style="color:var(--text); font-weight:600; margin-bottom:6px;">Benchmark (${episodes} eps, ${steps} max steps)</div>
+      <table style="width:100%; border-collapse:collapse; font-size:11px;">
+        <thead>
+          <tr style="color:var(--muted); text-align:left; border-bottom:1px solid var(--border);">
+            <th style="padding:4px 2px;">policy</th>
+            <th style="padding:4px 2px;">success</th>
+            <th style="padding:4px 2px;">avg r</th>
+            <th style="padding:4px 2px;">avg d</th>
+            <th style="padding:4px 2px;">avg steps</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    `;
+    setStatus('Benchmark complete.', 'ok');
+  } catch (e) {
+    console.error(e);
+    resultEl.innerHTML = `<span style="color:var(--err);">benchmark failed: ${e.message}</span>`;
+    setStatus(`Benchmark failed: ${e.message}`, 'err');
   } finally {
     btn.disabled = false;
   }
