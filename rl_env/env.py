@@ -31,6 +31,8 @@ class TaskConfig:
     lidar_max: float = 6.0
     spawn_region: tuple[float, float, float, float] | None = None
     """xmin, xmax, ymin, ymax. If None, read from MJCF agent body / model bounds."""
+    min_start_goal_dist: float = 1.5
+    max_start_goal_dist: float | None = None
     seed: int | None = None
 
 
@@ -126,11 +128,19 @@ class NavEnv(gym.Env):
         mujoco.mj_resetData(self.model, self.data)
 
         xmin, xmax, ymin, ymax = self.task.spawn_region
+        min_dist = float(max(0.0, self.task.min_start_goal_dist))
+        max_dist = self.task.max_start_goal_dist
 
+        agent = self.np_random.uniform([xmin, ymin], [xmax, ymax])
+        goal = self.np_random.uniform([xmin, ymin], [xmax, ymax])
         for _ in range(64):
             agent = self.np_random.uniform([xmin, ymin], [xmax, ymax])
             goal = self.np_random.uniform([xmin, ymin], [xmax, ymax])
-            if np.linalg.norm(agent - goal) > 1.5:
+            dist = float(np.linalg.norm(agent - goal))
+            if dist < min_dist:
+                continue
+            if max_dist is not None and dist > max_dist:
+                continue
                 break
 
         self.data.qpos[self._agent_x_qpos] = agent[0]

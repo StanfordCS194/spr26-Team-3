@@ -16,9 +16,23 @@ from stable_baselines3.common.vec_env import DummyVecEnv
 from rl_env.env import NavEnv, TaskConfig
 
 
-def _make_env_fn(mjcf_path: str, max_steps: int, seed: int):
+def _make_env_fn(
+    mjcf_path: str,
+    max_steps: int,
+    seed: int,
+    min_start_goal_dist: float,
+    max_start_goal_dist: float | None,
+):
     def _thunk():
-        env = NavEnv(mjcf_path, task=TaskConfig(max_steps=max_steps, seed=seed))
+        env = NavEnv(
+            mjcf_path,
+            task=TaskConfig(
+                max_steps=max_steps,
+                seed=seed,
+                min_start_goal_dist=min_start_goal_dist,
+                max_start_goal_dist=max_start_goal_dist,
+            ),
+        )
         return env
 
     return _thunk
@@ -33,9 +47,20 @@ def train_ppo(
     seed: int = 0,
     device: str = "auto",
     verbose: int = 1,
+    min_start_goal_dist: float = 1.0,
+    max_start_goal_dist: float | None = None,
 ) -> Path:
     mjcf_path = str(mjcf_path)
-    env_fns = [_make_env_fn(mjcf_path, max_steps, seed + i) for i in range(n_envs)]
+    env_fns = [
+        _make_env_fn(
+            mjcf_path,
+            max_steps,
+            seed + i,
+            min_start_goal_dist=min_start_goal_dist,
+            max_start_goal_dist=max_start_goal_dist,
+        )
+        for i in range(n_envs)
+    ]
     vec_env = DummyVecEnv(env_fns)
 
     model = PPO(

@@ -127,11 +127,15 @@ def api_run():
     mjcf = BUILDS_DIR / bid / "scene.xml"
     if not mjcf.exists():
         return jsonify({"error": f"unknown build {bid}"}), 404
+    meta_path = BUILDS_DIR / bid / "metadata.json"
+    meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
 
     episodes = int(payload.get("episodes", 5))
     steps = int(payload.get("steps", 500))
     seed = int(payload.get("seed", 0))
     policy_name = payload.get("policy", "greedy")
+    include_trace = bool(payload.get("include_trace", False))
+    trace_episode = int(payload.get("trace_episode", 0))
     policy_fn = _policy_greedy if policy_name == "greedy" else _policy_random
 
     if policy_name == "ppo":
@@ -151,17 +155,41 @@ def api_run():
 
     eps = []
     successes = 0
+    replay: dict | None = None
     t0 = time.time()
     for ep in range(episodes):
         obs, _ = env.reset(seed=seed + ep)
         ep_reward = 0.0
         ep_steps = 0
         info: dict = {}
+        trace = []
+        if include_trace and ep == trace_episode:
+            trace.append(
+                {
+                    "step": 0,
+                    "agent_xy": env._agent_xy().astype(float).tolist(),
+                    "goal_xy": env._goal_xy().astype(float).tolist(),
+                    "distance": float(np.linalg.norm(env._agent_xy() - env._goal_xy())),
+                    "collision": bool(env._has_scene_collision()),
+                    "reward": 0.0,
+                }
+            )
         for _ in range(steps):
             a = policy_fn(obs, rng)
             obs, r, term, trunc, info = env.step(a)
             ep_reward += r
             ep_steps += 1
+            if include_trace and ep == trace_episode:
+                trace.append(
+                    {
+                        "step": ep_steps,
+                        "agent_xy": env._agent_xy().astype(float).tolist(),
+                        "goal_xy": env._goal_xy().astype(float).tolist(),
+                        "distance": float(info.get("distance", -1.0)),
+                        "collision": bool(env._has_scene_collision()),
+                        "reward": float(r),
+                    }
+                )
             if term or trunc:
                 break
         eps.append(
@@ -172,6 +200,16 @@ def api_run():
                 "success": bool(info.get("success", False)),
             }
         )
+        if include_trace and ep == trace_episode:
+            replay = {
+                "episode": ep,
+                "policy": policy_name,
+                "steps": ep_steps,
+                "success": bool(info.get("success", False)),
+                "bounds_min": meta.get("bounds_min"),
+                "bounds_max": meta.get("bounds_max"),
+                "trace": trace,
+            }
         successes += int(info.get("success", False))
     env.close()
     elapsed = time.time() - t0
@@ -184,6 +222,7 @@ def api_run():
             "n_episodes": episodes,
             "avg_reward": float(round(sum(e["reward"] for e in eps) / max(len(eps), 1), 3)),
             "elapsed_s": round(elapsed, 3),
+            "replay": replay,
         }
     )
 
@@ -203,6 +242,9 @@ def api_train():
     max_steps = int(payload.get("max_steps", 300))
     seed = int(payload.get("seed", 0))
     device = payload.get("device", "cpu")
+    min_start_goal_dist = float(payload.get("min_start_goal_dist", 0.8))
+    max_start_goal_dist_raw = payload.get("max_start_goal_dist", 0)
+    max_start_goal_dist = float(max_start_goal_dist_raw) if float(max_start_goal_dist_raw) > 0 else None
 
     ckpt_path = BUILDS_DIR / bid / "policy.zip"
 
@@ -219,6 +261,8 @@ def api_train():
             seed=seed,
             device=device,
             verbose=0,
+            min_start_goal_dist=min_start_goal_dist,
+            max_start_goal_dist=max_start_goal_dist,
         )
     except Exception as e:
         return jsonify({"error": f"train failed: {e}"}), 500

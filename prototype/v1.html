@@ -218,6 +218,55 @@
   }
   .overlay-controls span { color: var(--text); font-family: ui-monospace, monospace; font-size: 10px; }
 
+  .replay {
+    margin-top: 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel-2);
+    padding: 10px;
+  }
+  .replay canvas {
+    width: 100%;
+    height: 180px;
+    display: block;
+    background: #0e1116;
+    border-radius: 6px;
+    border: 1px solid #202734;
+  }
+  .replay-chart {
+    width: 100%;
+    height: 96px;
+    display: block;
+    margin-top: 8px;
+    background: #0e1116;
+    border-radius: 6px;
+    border: 1px solid #202734;
+  }
+  .replay-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .replay-controls {
+    margin-top: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .replay-controls button {
+    width: auto;
+    padding: 4px 10px;
+    font-size: 12px;
+  }
+  .replay-controls input[type=range] {
+    flex: 1;
+    min-width: 0;
+    accent-color: var(--accent-2);
+  }
+
   .hidden { display: none !important; }
 </style>
 </head>
@@ -327,6 +376,18 @@
           </div>
           <button class="btn" id="btn-rl-run" disabled style="margin-top:8px;">Run rollout</button>
           <div id="rl-run-result" style="font-size:11px; color:var(--muted); margin-top:8px; line-height:1.5; max-height:160px; overflow-y:auto;"></div>
+          <div class="replay" id="rl-replay" style="display:none;">
+            <div class="replay-head">
+              <span id="rl-replay-title">Replay</span>
+              <span id="rl-replay-metrics">step 0/0</span>
+            </div>
+            <canvas id="rl-replay-canvas" width="520" height="280"></canvas>
+            <canvas id="rl-replay-chart" class="replay-chart" width="520" height="120"></canvas>
+            <div class="replay-controls">
+              <button class="btn" id="rl-replay-play">Play</button>
+              <input type="range" id="rl-replay-slider" min="0" max="0" step="1" value="0" />
+            </div>
+          </div>
         </div>
       </div>
 
@@ -723,6 +784,10 @@ $('btn-export-obj').onclick = () => {
 // ---------- RL Env: in-browser build + rollout via local server ----------
 let rlServerOnline = false;
 let rlBuildId = null;
+let rlReplayData = null;
+let rlReplayFrame = 0;
+let rlReplayAnimating = false;
+let rlReplayTimer = null;
 
 function reconstructionToOBJBlob(recon) {
   const { positions, indices } = recon;
@@ -754,6 +819,136 @@ async function checkRlServer() {
     $('btn-rl-build').disabled = true;
     $('btn-rl-run').disabled = true;
   }
+}
+
+function stopReplayAnimation() {
+  rlReplayAnimating = false;
+  if (rlReplayTimer) {
+    clearTimeout(rlReplayTimer);
+    rlReplayTimer = null;
+  }
+  $('rl-replay-play').textContent = 'Play';
+}
+
+function drawRlReplay() {
+  if (!rlReplayData || !rlReplayData.trace?.length) return;
+  const canvas = $('rl-replay-canvas');
+  const ctx = canvas.getContext('2d');
+  const { trace, bounds_min: bmin, bounds_max: bmax } = rlReplayData;
+  const frame = trace[Math.max(0, Math.min(rlReplayFrame, trace.length - 1))];
+  const pad = 18;
+  const width = canvas.width;
+  const height = canvas.height;
+  const minX = Array.isArray(bmin) ? bmin[0] : -3;
+  const maxX = Array.isArray(bmax) ? bmax[0] : 3;
+  const minY = Array.isArray(bmin) ? bmin[1] : -3;
+  const maxY = Array.isArray(bmax) ? bmax[1] : 3;
+  const spanX = Math.max(1e-3, maxX - minX);
+  const spanY = Math.max(1e-3, maxY - minY);
+  const scale = Math.min((width - pad * 2) / spanX, (height - pad * 2) / spanY);
+  const originX = (width - spanX * scale) * 0.5;
+  const originY = (height - spanY * scale) * 0.5;
+  const worldToCanvas = ([x, y]) => ([
+    originX + (x - minX) * scale,
+    height - (originY + (y - minY) * scale),
+  ]);
+
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = '#0e1116';
+  ctx.fillRect(0, 0, width, height);
+
+  ctx.strokeStyle = '#1f2937';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(originX, originY, spanX * scale, spanY * scale);
+
+  const goalPx = worldToCanvas(frame.goal_xy);
+  ctx.fillStyle = '#5eead4';
+  ctx.beginPath();
+  ctx.arc(goalPx[0], goalPx[1], 6, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = '#7aa2f7';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  for (let i = 0; i <= rlReplayFrame; i++) {
+    const p = worldToCanvas(trace[i].agent_xy);
+    if (i === 0) ctx.moveTo(p[0], p[1]);
+    else ctx.lineTo(p[0], p[1]);
+  }
+  ctx.stroke();
+
+  const agentPx = worldToCanvas(frame.agent_xy);
+  ctx.fillStyle = frame.collision ? '#f87171' : '#7aa2f7';
+  ctx.beginPath();
+  ctx.arc(agentPx[0], agentPx[1], 5, 0, Math.PI * 2);
+  ctx.fill();
+
+  $('rl-replay-metrics').textContent =
+    `step ${frame.step}/${trace.length - 1} · d=${frame.distance.toFixed(2)}${frame.collision ? ' · collision' : ''}`;
+  drawReplayDistanceChart();
+}
+
+function loadReplay(data) {
+  const replayEl = $('rl-replay');
+  if (!data || !data.trace || data.trace.length === 0) {
+    replayEl.style.display = 'none';
+    stopReplayAnimation();
+    rlReplayData = null;
+    return;
+  }
+  rlReplayData = data;
+  rlReplayFrame = 0;
+  replayEl.style.display = 'block';
+  $('rl-replay-title').textContent = `Replay · ${data.policy} · ep ${data.episode + 1} · ${data.success ? 'success' : 'fail'}`;
+  $('rl-replay-slider').max = String(data.trace.length - 1);
+  $('rl-replay-slider').value = '0';
+  drawRlReplay();
+}
+
+function drawReplayDistanceChart() {
+  if (!rlReplayData || !rlReplayData.trace?.length) return;
+  const canvas = $('rl-replay-chart');
+  const ctx = canvas.getContext('2d');
+  const width = canvas.width;
+  const height = canvas.height;
+  const trace = rlReplayData.trace;
+  const pad = { l: 34, r: 12, t: 12, b: 20 };
+  const chartW = width - pad.l - pad.r;
+  const chartH = height - pad.t - pad.b;
+  const maxDist = Math.max(0.01, ...trace.map((t) => t.distance));
+  const xFor = (i) => pad.l + (i / Math.max(1, trace.length - 1)) * chartW;
+  const yFor = (d) => pad.t + (1 - d / maxDist) * chartH;
+
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = '#0e1116';
+  ctx.fillRect(0, 0, width, height);
+  ctx.strokeStyle = '#1f2937';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(pad.l, pad.t, chartW, chartH);
+
+  ctx.strokeStyle = '#5eead4';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  for (let i = 0; i < trace.length; i++) {
+    const x = xFor(i);
+    const y = yFor(trace[i].distance);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+
+  const cx = xFor(rlReplayFrame);
+  const cy = yFor(trace[rlReplayFrame].distance);
+  ctx.fillStyle = '#7aa2f7';
+  ctx.beginPath();
+  ctx.arc(cx, cy, 3.5, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = '#8b949e';
+  ctx.font = '10px ui-monospace, SFMono-Regular, Menlo, monospace';
+  ctx.fillText('distance', 6, 14);
+  ctx.fillText(`0`, pad.l - 8, height - 6);
+  ctx.fillText(`${maxDist.toFixed(1)}m`, 4, pad.t + 4);
 }
 
 $('btn-rl-build').onclick = async () => {
@@ -792,6 +987,7 @@ $('btn-rl-build').onclick = async () => {
     $('btn-rl-train').disabled = false;
     rlPpoTrained = false;
     $('rl-train-result').textContent = '';
+    loadReplay(null);
   } catch (e) {
     console.error(e);
     resultEl.innerHTML = `<span style="color:var(--err);">build failed: ${e.message}</span>`;
@@ -825,6 +1021,8 @@ $('btn-rl-train').onclick = async () => {
         max_steps: 300,
         seed: 0,
         device: 'cpu',
+        min_start_goal_dist: 0.8,
+        max_start_goal_dist: 0,
       }),
     });
     const data = await res.json();
@@ -834,6 +1032,7 @@ $('btn-rl-train').onclick = async () => {
     resultEl.innerHTML = `
       <div style="color:var(--text); font-weight:600;">trained ${data.steps.toLocaleString()} steps</div>
       <div>${data.elapsed_s}s · ${data.fps.toLocaleString()} steps/s · wall ${wall}s</div>
+      <div>randomized start/goal pairs during training</div>
       <div>switch Policy → <code>ppo</code> to evaluate</div>
     `;
     $('rl-policy').value = 'ppo';
@@ -862,6 +1061,8 @@ $('btn-rl-run').onclick = async () => {
       episodes: parseInt($('rl-episodes').value, 10),
       steps: parseInt($('rl-steps').value, 10),
       seed: 0,
+      include_trace: true,
+      trace_episode: 0,
     };
     const res = await fetch('/api/run', {
       method: 'POST',
@@ -880,14 +1081,45 @@ $('btn-rl-run').onclick = async () => {
       </div>
       ${rows}
     `;
+    loadReplay(data.replay);
     setStatus(`Rollout done: ${data.successes}/${data.n_episodes} success.`, 'ok');
   } catch (e) {
     console.error(e);
     resultEl.innerHTML = `<span style="color:var(--err);">run failed: ${e.message}</span>`;
+    loadReplay(null);
     setStatus(`Run failed: ${e.message}`, 'err');
   } finally {
     btn.disabled = false;
   }
+};
+
+$('rl-replay-slider').oninput = () => {
+  if (!rlReplayData) return;
+  rlReplayFrame = parseInt($('rl-replay-slider').value, 10);
+  drawRlReplay();
+};
+
+$('rl-replay-play').onclick = () => {
+  if (!rlReplayData) return;
+  if (rlReplayAnimating) {
+    stopReplayAnimation();
+    return;
+  }
+  rlReplayAnimating = true;
+  $('rl-replay-play').textContent = 'Pause';
+  const tick = () => {
+    if (!rlReplayAnimating || !rlReplayData) return;
+    const maxFrame = rlReplayData.trace.length - 1;
+    rlReplayFrame = Math.min(rlReplayFrame + 1, maxFrame);
+    $('rl-replay-slider').value = String(rlReplayFrame);
+    drawRlReplay();
+    if (rlReplayFrame >= maxFrame) {
+      stopReplayAnimation();
+      return;
+    }
+    rlReplayTimer = setTimeout(tick, 45);
+  };
+  tick();
 };
 
 checkRlServer();

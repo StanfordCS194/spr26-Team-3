@@ -5,3 +5,4 @@ gymnasium>=0.29
 flask>=3.0
 stable-baselines3>=2.3
 torch>=2.2
+scipy>=1.11
