@@ -32,7 +32,7 @@ app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024  # 200 MB upload cap
 
 @app.get("/")
 def index():
-    return redirect("/prototype/v1.html")
+    return redirect("/prototype/v3.html")
 
 
 @app.get("/prototype/<path:p>")
@@ -225,6 +225,77 @@ def api_run():
             "replay": replay,
         }
     )
+
+
+@app.post("/api/frames")
+def api_frames():
+    import base64
+    import io
+    from PIL import Image
+
+    payload = request.get_json(silent=True) or {}
+    bid = payload.get("build_id")
+    if not bid:
+        return jsonify({"error": "missing build_id"}), 400
+    mjcf = BUILDS_DIR / bid / "scene.xml"
+    if not mjcf.exists():
+        return jsonify({"error": f"unknown build {bid}"}), 404
+
+    steps = int(payload.get("steps", 300))
+    seed = int(payload.get("seed", 0))
+    policy_name = payload.get("policy", "greedy")
+    max_frames = int(payload.get("max_frames", 40))
+    width = int(payload.get("width", 320))
+    height = int(payload.get("height", 240))
+
+    policy_fn = _policy_greedy if policy_name == "greedy" else _policy_random
+    if policy_name == "ppo":
+        ckpt = BUILDS_DIR / bid / "policy.zip"
+        if not ckpt.exists():
+            return jsonify({"error": "no trained policy — click Train PPO first"}), 400
+        from stable_baselines3 import PPO
+        ppo_model = PPO.load(str(ckpt), device="auto")
+        def policy_fn(obs, _):
+            action, _state = ppo_model.predict(obs, deterministic=True)
+            return action
+
+    env = NavEnv(str(mjcf), task=TaskConfig(max_steps=steps), render_mode="rgb_array", render_size=(width, height))
+    rng = np.random.default_rng(seed)
+    obs, _ = env.reset(seed=seed)
+
+    skip = max(1, steps // max_frames)
+    frames_b64 = []
+    ep_steps = 0
+    info: dict = {}
+
+    def capture():
+        frame = env.render()
+        if frame is None:
+            return
+        img = Image.fromarray(frame)
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=75)
+        frames_b64.append("data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode())
+
+    capture()
+    for i in range(steps):
+        a = policy_fn(obs, rng)
+        obs, _, term, trunc, info = env.step(a)
+        ep_steps += 1
+        if (i + 1) % skip == 0:
+            capture()
+        if term or trunc:
+            break
+    capture()
+
+    env.close()
+    return jsonify({
+        "frames": frames_b64,
+        "n_frames": len(frames_b64),
+        "steps": ep_steps,
+        "success": bool(info.get("success", False)),
+        "policy": policy_name,
+    })
 
 
 @app.post("/api/train")

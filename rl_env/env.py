@@ -49,11 +49,13 @@ class NavEnv(gym.Env):
         mjcf_path: str | Path,
         task: TaskConfig | None = None,
         render_mode: str | None = None,
+        render_size: tuple[int, int] = (640, 480),
     ):
         super().__init__()
         self.mjcf_path = str(mjcf_path)
         self.task = task or TaskConfig()
         self.render_mode = render_mode
+        self._render_size = render_size
 
         self.model = mujoco.MjModel.from_xml_path(self.mjcf_path)
         self.data = mujoco.MjData(self.model)
@@ -185,8 +187,16 @@ class NavEnv(gym.Env):
         if self.render_mode is None:
             return None
         if self._renderer is None:
-            self._renderer = mujoco.Renderer(self.model, height=480, width=640)
-        self._renderer.update_scene(self.data, camera=-1)
+            w, h = self._render_size
+            self._renderer = mujoco.Renderer(self.model, height=h, width=w)
+        cam = mujoco.MjvCamera()
+        cam.type = mujoco.mjtCamera.mjCAMERA_FREE
+        xmin, xmax, ymin, ymax = self.task.spawn_region
+        cam.lookat[:] = [(xmin + xmax) / 2, (ymin + ymax) / 2, 0.3]
+        cam.distance = max(xmax - xmin, ymax - ymin) * 0.85
+        cam.elevation = -89.0
+        cam.azimuth = 0.0
+        self._renderer.update_scene(self.data, camera=cam)
         return self._renderer.render()
 
     def close(self):
