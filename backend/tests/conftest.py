@@ -30,8 +30,11 @@ def db_url(postgres_container: PostgresContainer) -> str:
 
 @pytest.fixture(scope="session", autouse=True)
 def _patch_settings(db_url: str, monkeypatch_session) -> None:
-    monkeypatch_session.setattr(src.config.Settings.model_config, "env_file", None)
+    # Point Settings at the test container's URL and skip the .env file
+    # (pydantic-settings ignores env_file if the file doesn't exist, but
+    # explicitly setting DATABASE_URL via env overrides anything in .env).
     monkeypatch_session.setenv("DATABASE_URL", db_url)
+    monkeypatch_session.setenv("DATA_DIR", "/tmp/worldscan-tests")
     src.config.get_settings.cache_clear()
 
 

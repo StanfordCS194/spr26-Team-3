@@ -1,6 +1,7 @@
 import { Outlet, createRootRouteWithContext } from "@tanstack/react-router";
 import type { QueryClient } from "@tanstack/react-query";
 
+import { CommandPalette } from "@/components/CommandPalette";
 import { Sidebar } from "@/components/Sidebar";
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
@@ -10,6 +11,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       <main className="flex-1 flex flex-col overflow-hidden">
         <Outlet />
       </main>
+      <CommandPalette />
     </div>
   ),
 });

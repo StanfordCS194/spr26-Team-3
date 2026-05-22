@@ -101,12 +101,8 @@ export function Sidebar() {
             <Link
               to="/p/$projectId/build"
               params={{ projectId: p.id }}
-              className={({ isActive }: { isActive: boolean }) =>
-                cn(
-                  "block px-4 py-2.5 text-sm border-b border-border/40 hover:bg-accent transition-colors",
-                  isActive && "bg-accent",
-                )
-              }
+              className="block px-4 py-2.5 text-sm border-b border-border/40 hover:bg-accent transition-colors"
+              activeProps={{ className: "block px-4 py-2.5 text-sm border-b border-border/40 bg-accent transition-colors" }}
             >
               <div className="flex items-center justify-between gap-2 pr-6">
                 <div className="truncate flex-1">{p.name}</div>

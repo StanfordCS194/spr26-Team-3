@@ -11,7 +11,9 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     database_url: str = "postgresql+psycopg://worldscan:worldscan@localhost:5432/worldscan"
-    data_dir: Path = Path("/data")
+    # Default to a user-writable path so tests + non-container dev work.
+    # In docker, DATA_DIR=/data is set explicitly.
+    data_dir: Path = Path("./data")
     inngest_dev_server_url: str = "http://localhost:8288"
     inngest_app_id: str = "worldscan"
 
