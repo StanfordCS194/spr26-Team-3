@@ -3,16 +3,18 @@ serves the prototype HTML same-origin, so the browser can fetch /api/...
 without CORS gymnastics.
 
 Routes:
-  GET  /                    redirect to prototype/v1.html
+  GET  /                    redirect to prototype/v4.html
   GET  /prototype/<path>    static file under prototype/
   POST /api/build           multipart: file=mesh; form: up, diag, max_hulls
   POST /api/run             json: build_id, episodes, steps, policy, seed
+  POST /api/depth           multipart: image=jpg/png; returns f32 depth in meters
   GET  /api/builds          list known builds (debug)
 """
 from __future__ import annotations
 
 import json
 import secrets
+import subprocess
 import time
 from pathlib import Path
 
@@ -25,6 +27,14 @@ from rl_env.env import NavEnv, TaskConfig
 ROOT = Path(__file__).resolve().parent.parent
 PROTOTYPE_DIR = ROOT / "prototype"
 BUILDS_DIR = ROOT / "server_builds"
+MODELS_CACHE_DIR = ROOT / "server_builds" / "models"
+
+# ONNX models pulled on first request and cached on disk. GitHub release assets
+# don't serve CORS headers, so we proxy them through the same origin as the page.
+MODEL_URLS = {
+    "superpoint": "https://github.com/fabio-sim/LightGlue-ONNX/releases/download/v1.0.0/superpoint.onnx",
+    "superpoint_lightglue": "https://github.com/fabio-sim/LightGlue-ONNX/releases/download/v0.1.3/superpoint_lightglue.onnx",
+}
 
 app = Flask(__name__, static_folder=None)
 app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024  # 200 MB upload cap
@@ -32,12 +42,151 @@ app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024  # 200 MB upload cap
 
 @app.get("/")
 def index():
-    return redirect("/prototype/v3.html")
+    return redirect("/prototype/v4.html")
 
 
 @app.get("/prototype/<path:p>")
 def proto(p: str):
     return send_from_directory(PROTOTYPE_DIR, p)
+
+
+@app.get("/api/models/<name>")
+def get_model(name: str):
+    if name not in MODEL_URLS:
+        return jsonify({"error": f"unknown model: {name}"}), 404
+    MODELS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    cache_path = MODELS_CACHE_DIR / f"{name}.onnx"
+    if not cache_path.exists():
+        url = MODEL_URLS[name]
+        tmp_path = cache_path.with_suffix(".onnx.partial")
+        print(f"[models] downloading {name} from {url}")
+        # Use curl rather than urllib: macOS Python installs ship without a CA
+        # bundle by default, so urllib fails with CERTIFICATE_VERIFY_FAILED.
+        try:
+            subprocess.run(
+                ["curl", "-fsSL", "-o", str(tmp_path), url], check=True
+            )
+        except (subprocess.CalledProcessError, FileNotFoundError) as e:
+            tmp_path.unlink(missing_ok=True)
+            return jsonify({"error": f"download failed: {e}"}), 502
+        tmp_path.rename(cache_path)
+        print(f"[models] cached {name} -> {cache_path} ({cache_path.stat().st_size} bytes)")
+    return send_from_directory(
+        cache_path.parent, cache_path.name, mimetype="application/octet-stream"
+    )
+
+
+# Two depth backends, both lazy-loaded and cached in memory:
+#  - "indoor": Depth-Anything-V2-Metric-Indoor-Small (~25M params, ~100 MB,
+#    ~500 MB RAM). Faster, used by prototype/v4.html (stable). No FOV estimate.
+#  - "pro": Apple Depth-Pro (~1B params, ~1 GB, ~2 GB RAM). Stronger on flat
+#    indoor surfaces and emits an estimated horizontal FOV per image. Used by
+#    prototype/v4.2.html (work-in-progress).
+# Cache key: model name -> dict of backend-specific handles. Both can coexist
+# in RAM if the user toggles between v4 and v4.2.
+_depth_cache: dict = {}
+_depth_device = None
+
+
+def _pick_device():
+    global _depth_device
+    if _depth_device is not None:
+        return _depth_device
+    import torch
+    if torch.cuda.is_available():
+        _depth_device = "cuda"
+    elif getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+        _depth_device = "mps"
+    else:
+        _depth_device = "cpu"
+    return _depth_device
+
+
+def _ensure_depth_model(name: str):
+    if name in _depth_cache:
+        return _depth_cache[name]
+    device = _pick_device()
+    t = time.time()
+    if name == "indoor":
+        from transformers import pipeline
+        print(f"[depth] loading Depth-Anything-V2-Metric-Indoor-Small on device={device}…")
+        pipe = pipeline(
+            task="depth-estimation",
+            model="depth-anything/Depth-Anything-V2-Metric-Indoor-Small-hf",
+            device=device,
+        )
+        _depth_cache[name] = {"kind": "pipeline", "pipe": pipe}
+    elif name == "pro":
+        import torch
+        from transformers import DepthProForDepthEstimation, DepthProImageProcessor
+        print(f"[depth] loading Depth-Pro (1B params, ~1 GB) on device={device}…")
+        proc = DepthProImageProcessor.from_pretrained("apple/DepthPro-hf")
+        model = (
+            DepthProForDepthEstimation.from_pretrained("apple/DepthPro-hf")
+            .to(device)
+            .eval()
+        )
+        _depth_cache[name] = {"kind": "explicit", "proc": proc, "model": model, "device": device}
+    else:
+        raise ValueError(f"unknown depth model: {name}")
+    print(f"[depth] loaded {name} in {time.time() - t:.1f}s")
+    return _depth_cache[name]
+
+
+@app.post("/api/depth")
+def api_depth():
+    if "image" not in request.files:
+        return jsonify({"error": "missing 'image' file field"}), 400
+    name = request.args.get("model", "indoor")
+    if name not in ("indoor", "pro"):
+        return jsonify({"error": f"unknown model: {name}"}), 400
+    import torch
+    from PIL import Image
+    img = Image.open(request.files["image"].stream).convert("RGB")
+    handle = _ensure_depth_model(name)
+
+    t = time.time()
+    fov_deg = None
+    if handle["kind"] == "pipeline":
+        # Simple transformers pipeline path (Depth-Anything-V2-Metric-Indoor).
+        out = handle["pipe"](img)
+        pred = out["predicted_depth"]
+        depth = pred.detach().cpu().numpy() if hasattr(pred, "detach") else np.asarray(pred)
+    else:
+        # Explicit Depth-Pro path; also surface its FOV estimate.
+        proc, model, device = handle["proc"], handle["model"], handle["device"]
+        inputs = proc(images=img, return_tensors="pt").to(device)
+        with torch.inference_mode():
+            outputs = model(**inputs)
+        post = proc.post_process_depth_estimation(
+            outputs, target_sizes=[(img.height, img.width)]
+        )[0]
+        depth = post["predicted_depth"].detach().cpu().numpy()
+        fov_value = post.get("field_of_view") or post.get("fov")
+        if fov_value is not None:
+            fov_deg = float(fov_value.item() if hasattr(fov_value, "item") else fov_value)
+
+    depth = np.asarray(depth, dtype=np.float32)
+    while depth.ndim > 2:
+        depth = depth.squeeze(0)
+    h, w = depth.shape
+    body = depth.tobytes()
+
+    fov_log = f", fov={fov_deg:.1f}°" if fov_deg is not None else ""
+    print(
+        f"[depth] {name}: {img.size[0]}x{img.size[1]} -> {w}x{h} in {time.time() - t:.2f}s "
+        f"(range {float(depth.min()):.2f}-{float(depth.max()):.2f} m{fov_log})"
+    )
+    headers = {
+        "Content-Type": "application/octet-stream",
+        "Content-Length": str(len(body)),
+        "X-Depth-Width": str(w),
+        "X-Depth-Height": str(h),
+    }
+    if fov_deg is not None:
+        headers["X-Estimated-Fov-Deg"] = f"{fov_deg:.4f}"
+        headers["Access-Control-Expose-Headers"] = "X-Depth-Width,X-Depth-Height,X-Estimated-Fov-Deg"
+    return body, 200, headers
 
 
 @app.get("/api/builds")
@@ -352,7 +501,7 @@ def api_train():
 def serve(host: str = "127.0.0.1", port: int = 5174) -> None:
     BUILDS_DIR.mkdir(exist_ok=True)
     print(f"WorldScan server: http://{host}:{port}/")
-    print(f"  prototype:   http://{host}:{port}/prototype/v1.html")
+    print(f"  prototype:   http://{host}:{port}/prototype/v4.html")
     print(f"  build dir:   {BUILDS_DIR}")
     app.run(host=host, port=port, debug=False, use_reloader=False)
 
