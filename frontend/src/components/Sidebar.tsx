@@ -86,7 +86,10 @@ export function Sidebar() {
             const p = await createProject.mutateAsync(name.trim());
             setName("");
             setAdding(false);
-            navigate({ to: "/p/$projectId/capture", params: { projectId: p.id } });
+            // New project — the index route will redirect to /capture
+            // (the only unlocked step) but we go through it anyway for
+            // consistency with the sidebar item link below.
+            navigate({ to: "/p/$projectId", params: { projectId: p.id } });
           }}
         >
           <input
@@ -157,7 +160,7 @@ function SidebarItem({
   return (
     <div className="relative group">
       <Link
-        to="/p/$projectId/build"
+        to="/p/$projectId"
         params={{ projectId: project.id }}
         className="block px-4 py-2.5 text-sm border-b border-border/40 hover:bg-accent transition-colors"
         activeProps={{
