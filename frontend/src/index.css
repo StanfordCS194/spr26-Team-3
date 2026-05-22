@@ -1,0 +1,76 @@
+@import "tailwindcss";
+@import "geist/font/sans.css";
+@import "geist/font/mono.css";
+
+@theme {
+  --font-sans: "Geist Variable", system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, monospace;
+  --radius: 2px;
+  --tracking-tight: -0.012em;
+  --tracking-wider: 0.08em;
+}
+
+/*
+ * Dark-only by default. Tokens match openspec/changes/worldscan-v2-video-product/design.md
+ * "Visual direction" — Linear / Blender / Three.js editor feel.
+ */
+@layer base {
+  :root {
+    --background: oklch(0.085 0 0);
+    --foreground: oklch(0.96 0 0);
+    --card: oklch(0.115 0 0);
+    --card-foreground: oklch(0.96 0 0);
+    --popover: oklch(0.115 0 0);
+    --popover-foreground: oklch(0.96 0 0);
+    --primary: oklch(0.72 0.18 230);
+    --primary-foreground: oklch(0.08 0 0);
+    --secondary: oklch(0.16 0 0);
+    --secondary-foreground: oklch(0.96 0 0);
+    --muted: oklch(0.14 0 0);
+    --muted-foreground: oklch(0.58 0 0);
+    --accent: oklch(0.17 0 0);
+    --accent-foreground: oklch(0.96 0 0);
+    --destructive: oklch(0.65 0.22 25);
+    --destructive-foreground: oklch(0.96 0 0);
+    --border: oklch(0.18 0 0);
+    --input: oklch(0.18 0 0);
+    --ring: oklch(0.72 0.18 230);
+
+    --status-ok: oklch(0.74 0.18 145);
+    --status-warn: oklch(0.78 0.16 80);
+    --status-fail: oklch(0.65 0.22 25);
+  }
+
+  * {
+    border-color: var(--border);
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    font-feature-settings: "ss01", "ss02", "cv11", "calt";
+    letter-spacing: var(--tracking-tight);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  code,
+  kbd,
+  pre,
+  .mono {
+    font-family: var(--font-mono);
+    letter-spacing: 0;
+  }
+
+  h1, h2, h3 {
+    font-weight: 500;
+    letter-spacing: -0.02em;
+  }
+}
