@@ -6,6 +6,7 @@ import { StatusDot } from "@/components/StatusDot";
 import { StepNav } from "@/components/StepNav";
 import { TrajectoryViewer, type TrajectoryRun } from "@/components/TrajectoryViewer";
 import {
+  useProjectRuns,
   useProjectState,
   useReplayWithTrajectories,
   type TrajectoryReplayResponse,
@@ -40,6 +41,7 @@ function ReplayScreen() {
 
   const canReplay = state?.replay.complete ?? false;
   const canPPO = state?.train.complete ?? false;
+  const { data: pastRuns = [] } = useProjectRuns(projectId);
 
   const run = async (policy: PolicyName) => {
     setFocus(policy);
@@ -211,6 +213,36 @@ function ReplayScreen() {
                 )}
               </div>
             </section>
+          </section>
+        )}
+
+        {pastRuns.length > 0 && (
+          <section className="mt-12">
+            <h2 className="mono text-[11px] uppercase tracking-wider text-muted-foreground mb-3">
+              Run history
+            </h2>
+            <div className="border border-border rounded-sm divide-y divide-border max-w-3xl">
+              {pastRuns.map((r) => {
+                const pct = r.episodes > 0 ? (100 * r.successes) / r.episodes : 0;
+                return (
+                  <div key={r.id} className="px-4 py-2.5 flex items-center justify-between text-xs">
+                    <div className="mono flex items-center gap-4">
+                      <span className="text-muted-foreground">
+                        {new Date(r.created_at).toLocaleTimeString()}
+                      </span>
+                      <span>{r.baseline ?? "ppo"}</span>
+                    </div>
+                    <div className="mono flex items-center gap-6">
+                      <span>
+                        {r.successes}/{r.episodes}{" "}
+                        <span className="text-muted-foreground">({pct.toFixed(0)}%)</span>
+                      </span>
+                      <span className="text-muted-foreground">avg r {r.avg_reward.toFixed(1)}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </section>
         )}
       </div>

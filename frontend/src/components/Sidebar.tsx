@@ -1,22 +1,62 @@
-import { Link } from "@tanstack/react-router";
-import { Plus } from "lucide-react";
+import { Link, useNavigate } from "@tanstack/react-router";
+import { Download, MoreHorizontal, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 
-import { useCreateProject, useProjects } from "@/lib/api";
+import { useCreateProject, useDeleteProject, useProjectsSummary } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
+const PILL_COLORS: Record<string, string> = {
+  New: "text-muted-foreground/60",
+  Captured: "text-[var(--status-warn)]",
+  Reconstructed: "text-[var(--status-warn)]",
+  Validated: "text-[var(--status-warn)]",
+  "Validation failed": "text-[var(--status-fail)]",
+  Built: "text-[var(--status-ok)]",
+  Trained: "text-[var(--status-ok)]",
+};
+
+function pillClass(pill: string): string {
+  if (pill.startsWith("Trained")) return PILL_COLORS["Trained"];
+  return PILL_COLORS[pill] ?? "text-muted-foreground/60";
+}
+
 export function Sidebar() {
-  const { data: projects = [], isLoading } = useProjects();
+  const { data: projects = [], isLoading } = useProjectsSummary();
   const createProject = useCreateProject();
+  const deleteProject = useDeleteProject();
+  const navigate = useNavigate();
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+
+  const handleDelete = async (id: string, projectName: string) => {
+    const confirm = window.prompt(
+      `Type "${projectName}" to confirm delete (cascades, can't be undone):`,
+    );
+    if (confirm === projectName) {
+      await deleteProject.mutateAsync(id);
+      setMenuFor(null);
+      navigate({ to: "/" });
+    }
+  };
+
+  const handleExport = (id: string, projectName: string) => {
+    // Trigger streaming download by navigating to the export endpoint
+    const link = document.createElement("a");
+    link.href = `/api/projects/${id}/export`;
+    link.download = `${projectName}-${id}.zip`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setMenuFor(null);
+  };
 
   return (
-    <aside className="w-64 border-r border-border bg-card flex flex-col h-full">
+    <aside className="w-72 border-r border-border bg-card flex flex-col h-full">
       <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-        <span className="text-xs uppercase tracking-wider text-muted-foreground mono">
+        <Link to="/" className="text-xs uppercase tracking-wider text-muted-foreground mono hover:text-foreground">
           WorldScan
-        </span>
+        </Link>
         <button
           aria-label="new project"
           onClick={() => setAdding(true)}
@@ -32,9 +72,10 @@ export function Sidebar() {
           onSubmit={async (e) => {
             e.preventDefault();
             if (!name.trim()) return;
-            await createProject.mutateAsync(name.trim());
+            const p = await createProject.mutateAsync(name.trim());
             setName("");
             setAdding(false);
+            navigate({ to: "/p/$projectId/capture", params: { projectId: p.id } });
           }}
         >
           <input
@@ -56,20 +97,63 @@ export function Sidebar() {
           </p>
         )}
         {projects.map((p) => (
-          <Link
-            key={p.id}
-            to="/p/$projectId/build"
-            params={{ projectId: p.id }}
-            className={({ isActive }: { isActive: boolean }) =>
-              cn(
-                "block px-4 py-2 text-sm border-b border-border/40 hover:bg-accent",
-                isActive && "bg-accent",
-              )
-            }
-          >
-            <div className="truncate">{p.name}</div>
-            <div className="text-[10px] text-muted-foreground mono mt-0.5">{p.id}</div>
-          </Link>
+          <div key={p.id} className="relative group">
+            <Link
+              to="/p/$projectId/build"
+              params={{ projectId: p.id }}
+              className={({ isActive }: { isActive: boolean }) =>
+                cn(
+                  "block px-4 py-2.5 text-sm border-b border-border/40 hover:bg-accent transition-colors",
+                  isActive && "bg-accent",
+                )
+              }
+            >
+              <div className="flex items-center justify-between gap-2 pr-6">
+                <div className="truncate flex-1">{p.name}</div>
+                {p.n_runs > 0 && (
+                  <span className="mono text-[9px] text-muted-foreground">{p.n_runs}r</span>
+                )}
+              </div>
+              <div className="flex items-center justify-between mt-0.5">
+                <div className="text-[10px] text-muted-foreground mono truncate">{p.id}</div>
+                <div className={cn("text-[10px] mono", pillClass(p.status_pill))}>
+                  {p.status_pill}
+                </div>
+              </div>
+            </Link>
+            <button
+              aria-label="project actions"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setMenuFor(menuFor === p.id ? null : p.id);
+              }}
+              className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-sm hover:bg-background"
+            >
+              <MoreHorizontal size={12} className="text-muted-foreground" />
+            </button>
+            {menuFor === p.id && (
+              <div
+                className="absolute z-20 top-7 right-2 bg-card border border-border rounded-sm shadow-md min-w-[140px] py-1"
+                onMouseLeave={() => setMenuFor(null)}
+              >
+                <button
+                  onClick={() => handleExport(p.id, p.name)}
+                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-accent flex items-center gap-2"
+                >
+                  <Download size={11} />
+                  Export
+                </button>
+                <button
+                  onClick={() => handleDelete(p.id, p.name)}
+                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-accent flex items-center gap-2 text-[var(--status-fail)]"
+                >
+                  <Trash2 size={11} />
+                  Delete
+                </button>
+              </div>
+            )}
+          </div>
         ))}
       </nav>
     </aside>
