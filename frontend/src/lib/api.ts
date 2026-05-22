@@ -201,3 +201,87 @@ export const useValidate = (projectId: string) => {
     },
   });
 };
+
+// ── PR-C: training + trajectories ──────────────────────────────────────────
+
+export type Policy = {
+  id: string;
+  build_id: string;
+  algo: string;
+  ckpt_path: string;
+  total_steps: number;
+  metrics: {
+    progress?: number;
+    steps?: number;
+    avg_reward?: number;
+    fps?: number;
+    elapsed_s?: number;
+    trace?: Array<{ step: number; reward: number }>;
+    done?: boolean;
+    error?: string;
+  };
+  created_at: string;
+};
+
+export const usePolicies = (projectId: string) =>
+  useQuery({
+    queryKey: ["policies", projectId],
+    queryFn: () => get<Policy[]>(`/api/projects/${projectId}/policies`),
+    enabled: !!projectId,
+  });
+
+export const useLatestPolicy = (projectId: string) => {
+  const { data } = usePolicies(projectId);
+  return data?.[0] ?? null;
+};
+
+export const usePolicyLive = (projectId: string, policyId: string | null | undefined) =>
+  useQuery({
+    queryKey: ["policy", policyId],
+    queryFn: () => get<Policy>(`/api/projects/${projectId}/policies/${policyId}`),
+    enabled: !!policyId,
+    refetchInterval: (q) => {
+      const m = (q.state.data as Policy | undefined)?.metrics;
+      return m && !m.done ? 1000 : false;
+    },
+  });
+
+export const useTrain = (projectId: string) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { total_steps: number; n_envs: number; seed: number }) =>
+      send<Policy>(`/api/projects/${projectId}/train`, "POST", body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["policies", projectId] });
+      qc.invalidateQueries({ queryKey: ["project-state", projectId] });
+    },
+  });
+};
+
+export type TrajectoryPoint = { step: number; x: number; y: number; collision: boolean };
+export type TrajectoryEpisode = ReplayEpisode & {
+  failure_class: "success" | "timeout" | "stuck" | "collided" | "near-miss";
+  spawn: number[];
+  goal: number[];
+  trajectory: TrajectoryPoint[] | null;
+};
+export type TrajectoryReplayResponse = Omit<ReplayResponse, "episodes"> & {
+  bounds: { min: number[]; max: number[] };
+  spawn_region: { xmin: number; xmax: number; ymin: number; ymax: number };
+  episodes: TrajectoryEpisode[];
+};
+
+export const useReplayWithTrajectories = (projectId: string) =>
+  useMutation({
+    mutationFn: (body: {
+      policy: "random" | "greedy" | "ppo";
+      episodes: number;
+      max_steps: number;
+      seed: number;
+      policy_id?: string;
+    }) =>
+      send<TrajectoryReplayResponse>(`/api/projects/${projectId}/replay`, "POST", {
+        ...body,
+        include_trajectories: true,
+      }),
+  });
