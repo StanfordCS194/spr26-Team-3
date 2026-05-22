@@ -21,3 +21,30 @@ build/
 .DS_Store
 .idea/
 .vscode/
+
+# Node (frontend + shared)
+node_modules/
+*.log
+.yarn/cache
+.yarn/install-state.gz
+.yarn/build-state.yml
+.pnp.*
+dist/
+.vite/
+
+# uv / pip caches
+.uv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# WorldScan runtime state (per-project artifacts)
+/data/
+
+# generated typegen
+shared/ts/api.d.ts
+
+# env
+.env
+.env.local
+.env.*.local
