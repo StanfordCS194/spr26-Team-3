@@ -17,8 +17,12 @@ from src.features.validation.router import router as validation_router
 from src.inngest_client import FUNCTIONS, inngest_client
 
 # Importing feature modules registers Inngest functions into FUNCTIONS.
+from src.features.builds import inngest_functions as _build_fns  # noqa: F401
 from src.features.reconstruction import inngest_functions as _reconstruct_fns  # noqa: F401
+from src.features.replay import inngest_functions as _replay_fns  # noqa: F401
 from src.features.training import inngest_functions as _training_fns  # noqa: F401
+from src.features.validation import inngest_functions as _validation_fns  # noqa: F401
+from src import inngest_failures as _inngest_failures  # noqa: F401
 
 _settings = get_settings()
 

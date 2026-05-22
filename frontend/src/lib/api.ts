@@ -5,6 +5,12 @@
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+// Inngest writes terminal status to the DB the moment a function finishes,
+// but the frontend only sees it on the next poll. Keep this tight so the
+// "running → ok" transition feels instant on fast jobs (demo_fixture is
+// ~2s). For long jobs the 600ms tick is still well under network noise.
+const RUNNING_POLL_MS = 600;
+
 export type Project = {
   id: string;
   name: string;
@@ -129,23 +135,78 @@ export const useDeleteProject = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => send<void>(`/api/projects/${id}`, "DELETE"),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["projects"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["projects"] });
+      qc.invalidateQueries({ queryKey: ["projects-summary"] });
+    },
   });
+};
+
+export const useRenameProject = (id: string) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => send<Project>(`/api/projects/${id}`, "PATCH", { name }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["projects"] });
+      qc.invalidateQueries({ queryKey: ["projects-summary"] });
+      qc.invalidateQueries({ queryKey: ["project", id] });
+    },
+  });
+};
+
+// ── Build (Inngest-backed) ────────────────────────────────────────────────
+
+export type BuildRow = {
+  id: string;
+  project_id: string;
+  reconstruction_id: string | null;
+  mjcf_path: string | null;
+  n_hulls: number | null;
+  bounds: { min: number[]; max: number[] } | null;
+  spawn_region: { xmin: number; xmax: number; ymin: number; ymax: number } | null;
+  status: "pending" | "running" | "ok" | "failed";
+  error: string | null;
+  created_at: string;
 };
 
 export const useBuild = (projectId: string) => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => send<Build>(`/api/projects/${projectId}/build`, "POST", { up_axis: "y" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["project-state", projectId] }),
+    mutationFn: () =>
+      send<BuildRow>(`/api/projects/${projectId}/build`, "POST", { up_axis: "y" }),
+    onSuccess: (created) => {
+      // Seed the cache with the new pending row so the polling query
+      // re-engages immediately instead of holding the previous status=ok.
+      qc.setQueryData(["latest-build", projectId], created);
+      qc.invalidateQueries({ queryKey: ["latest-build", projectId] });
+      qc.invalidateQueries({ queryKey: ["project-state", projectId] });
+    },
   });
 };
 
-export const useReplay = (projectId: string) =>
-  useMutation({
-    mutationFn: (body: { policy: "random" | "greedy"; episodes: number; max_steps: number; seed: number }) =>
-      send<ReplayResponse>(`/api/projects/${projectId}/replay`, "POST", body),
+export const useLatestBuild = (projectId: string) => {
+  const qc = useQueryClient();
+  return useQuery({
+    queryKey: ["latest-build", projectId],
+    queryFn: async () => {
+      const next = await get<BuildRow | null>(`/api/projects/${projectId}/build/latest`);
+      const prev = qc.getQueryData<BuildRow | null>(["latest-build", projectId]);
+      if (
+        (next?.status === "ok" || next?.status === "failed") &&
+        (prev?.status === "pending" || prev?.status === "running")
+      ) {
+        qc.invalidateQueries({ queryKey: ["project-state", projectId] });
+        qc.invalidateQueries({ queryKey: ["projects-summary"] });
+      }
+      return next;
+    },
+    refetchInterval: (q) => {
+      const status = (q.state.data as BuildRow | null)?.status;
+      return status === "pending" || status === "running" ? RUNNING_POLL_MS : false;
+    },
+    enabled: !!projectId,
   });
+};
 
 export type BackendInfo = { name: string; implemented: boolean; requires_gpu: boolean };
 
@@ -153,7 +214,11 @@ export const useBackends = () =>
   useQuery({
     queryKey: ["backends"],
     queryFn: () => get<BackendInfo[]>("/api/reconstruction/backends"),
-    staleTime: 60_000,
+    // Backend availability flips at startup (vggt depends on pip + cuda),
+    // so refetch eagerly instead of caching.
+    staleTime: 0,
+    refetchOnMount: true,
+    refetchOnWindowFocus: true,
   });
 
 export type Reconstruction = {
@@ -194,41 +259,88 @@ export const useReconstruct = (projectId: string) => {
   return useMutation({
     mutationFn: (body: { backend: string; params?: Record<string, unknown> }) =>
       send<Reconstruction>(`/api/projects/${projectId}/reconstruct`, "POST", body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["project-state", projectId] }),
+    onSuccess: (created) => {
+      // Seed the latest-reconstruction cache with the new pending row so
+      // the polling query immediately flips into running mode (refetching
+      // every 1.5s). Without this it would keep showing the previous
+      // `status=ok` row and never notice the new job.
+      qc.setQueryData(["reconstruction", projectId], created);
+      qc.invalidateQueries({ queryKey: ["reconstruction", projectId] });
+      qc.invalidateQueries({ queryKey: ["project-state", projectId] });
+    },
   });
 };
 
-export const useLatestReconstruction = (projectId: string) =>
-  useQuery({
+export const useLatestReconstruction = (projectId: string) => {
+  const qc = useQueryClient();
+  return useQuery({
     queryKey: ["reconstruction", projectId],
-    queryFn: () => get<Reconstruction | null>(`/api/projects/${projectId}/reconstruction`),
+    queryFn: async () => {
+      const next = await get<Reconstruction | null>(
+        `/api/projects/${projectId}/reconstruction`,
+      );
+      const prev = qc.getQueryData<Reconstruction | null>(["reconstruction", projectId]);
+      if (
+        (next?.status === "ok" || next?.status === "failed") &&
+        (prev?.status === "pending" || prev?.status === "running")
+      ) {
+        qc.invalidateQueries({ queryKey: ["project-state", projectId] });
+        qc.invalidateQueries({ queryKey: ["projects-summary"] });
+      }
+      return next;
+    },
     refetchInterval: (q) => {
       const status = (q.state.data as Reconstruction | null)?.status;
-      return status === "pending" || status === "running" ? 1500 : false;
+      return status === "pending" || status === "running" ? RUNNING_POLL_MS : false;
     },
     enabled: !!projectId,
   });
+};
 
 export type Validation = {
   id: string;
   reconstruction_id: string;
-  report: import("@/components/ValidationReport").Report;
+  report: import("@/components/ValidationReport").Report | null;
   user_override: boolean;
+  status: "pending" | "running" | "ok" | "failed";
+  error: string | null;
   created_at: string;
 };
 
-export const useLatestValidation = (projectId: string) =>
-  useQuery({
+export const useLatestValidation = (projectId: string) => {
+  const qc = useQueryClient();
+  return useQuery({
     queryKey: ["validation", projectId],
-    queryFn: () => get<Validation | null>(`/api/projects/${projectId}/validate/latest`),
+    queryFn: async () => {
+      const next = await get<Validation | null>(
+        `/api/projects/${projectId}/validate/latest`,
+      );
+      const prev = qc.getQueryData<Validation | null>(["validation", projectId]);
+      if (
+        (next?.status === "ok" || next?.status === "failed") &&
+        (prev?.status === "pending" || prev?.status === "running")
+      ) {
+        qc.invalidateQueries({ queryKey: ["project-state", projectId] });
+        qc.invalidateQueries({ queryKey: ["projects-summary"] });
+      }
+      return next;
+    },
     enabled: !!projectId,
+    refetchInterval: (q) => {
+      const status = (q.state.data as Validation | null)?.status;
+      return status === "pending" || status === "running" ? RUNNING_POLL_MS : false;
+    },
   });
+};
 
 export const useValidate = (projectId: string) => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => send<Validation>(`/api/projects/${projectId}/validate`, "POST"),
-    onSuccess: () => {
+    onSuccess: (created) => {
+      // Seed the latest-validation cache with the pending row so polling
+      // kicks back in (was stuck on the previous status=ok).
+      qc.setQueryData(["validation", projectId], created);
       qc.invalidateQueries({ queryKey: ["validation", projectId] });
       qc.invalidateQueries({ queryKey: ["project-state", projectId] });
     },
@@ -304,17 +416,70 @@ export type TrajectoryReplayResponse = Omit<ReplayResponse, "episodes"> & {
   episodes: TrajectoryEpisode[];
 };
 
-export const useReplayWithTrajectories = (projectId: string) =>
-  useMutation({
+// ── Replay: Inngest-backed poll-then-fetch ────────────────────────────────
+
+export type RunRowDetail = {
+  id: string;
+  policy_id: string | null;
+  baseline: string | null;
+  status: "pending" | "running" | "ok" | "failed";
+  error: string | null;
+  episodes: number | null;
+  successes: number | null;
+  avg_reward: number | null;
+};
+
+export const useStartReplay = (projectId: string) => {
+  const qc = useQueryClient();
+  return useMutation({
     mutationFn: (body: {
       policy: "random" | "greedy" | "ppo";
       episodes: number;
       max_steps: number;
       seed: number;
       policy_id?: string;
-    }) =>
-      send<TrajectoryReplayResponse>(`/api/projects/${projectId}/replay`, "POST", {
-        ...body,
-        include_trajectories: true,
-      }),
+    }) => send<RunRowDetail>(`/api/projects/${projectId}/replay`, "POST", body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["runs", projectId] }),
+  });
+};
+
+export const useRun = (projectId: string, runId: string | null | undefined) => {
+  const qc = useQueryClient();
+  return useQuery({
+    queryKey: ["run", projectId, runId],
+    queryFn: async () => {
+      const next = await get<RunRowDetail>(`/api/projects/${projectId}/runs/${runId}`);
+      const prev = qc.getQueryData<RunRowDetail | undefined>(["run", projectId, runId]);
+      if (
+        (next?.status === "ok" || next?.status === "failed") &&
+        (prev?.status === "pending" || prev?.status === "running")
+      ) {
+        qc.invalidateQueries({ queryKey: ["runs", projectId] });
+        qc.invalidateQueries({ queryKey: ["project-state", projectId] });
+      }
+      return next;
+    },
+    enabled: !!projectId && !!runId,
+    refetchInterval: (q) => {
+      const status = (q.state.data as RunRowDetail | undefined)?.status;
+      return status === "pending" || status === "running" ? RUNNING_POLL_MS : false;
+    },
+  });
+};
+
+export const useRunTrajectories = (
+  projectId: string,
+  runId: string | null | undefined,
+  ready: boolean,
+) =>
+  useQuery({
+    queryKey: ["run-trajectories", projectId, runId],
+    queryFn: () =>
+      get<{
+        bounds: { min: number[]; max: number[] };
+        spawn_region: { xmin: number; xmax: number; ymin: number; ymax: number };
+        episodes: TrajectoryEpisode[];
+      }>(`/api/projects/${projectId}/runs/${runId}/trajectories`),
+    enabled: !!projectId && !!runId && ready,
+    staleTime: Infinity,
   });

@@ -1,13 +1,15 @@
-"""Validation route: run the mesh check catalog against a project's latest
-reconstruction.
+"""Validation route: queues a Validation row + emits Inngest event.
+The function runs the 6-check catalog and persists `report`.
 """
 from __future__ import annotations
 
+import inngest
 from fastapi import APIRouter, HTTPException
+from nanoid import generate as nanoid
 from sqlalchemy import select
 
 from src.deps import DbSession, ProjectDep
-from src.features.validation.checks import run_all
+from src.inngest_client import inngest_client
 from src.models import Reconstruction, Validation
 from src.schemas import ValidationOut
 
@@ -15,7 +17,7 @@ router = APIRouter()
 
 
 @router.post("/{project_id}/validate", response_model=ValidationOut)
-def validate_project(project: ProjectDep, db: DbSession) -> Validation:
+async def validate_project(project: ProjectDep, db: DbSession) -> Validation:
     recon = db.scalars(
         select(Reconstruction)
         .where(Reconstruction.project_id == project.id, Reconstruction.status == "ok")
@@ -25,14 +27,24 @@ def validate_project(project: ProjectDep, db: DbSession) -> Validation:
         raise HTTPException(
             400, "no successful reconstruction for this project — run Reconstruct first"
         )
-    if not recon.mesh_path:
-        raise HTTPException(500, f"reconstruction {recon.id} has no mesh_path")
 
-    report = run_all(recon.mesh_path)
-    v = Validation(reconstruction_id=recon.id, report=report)
+    v = Validation(
+        id=nanoid(size=12),
+        reconstruction_id=recon.id,
+        status="pending",
+    )
     db.add(v)
     db.commit()
     db.refresh(v)
+
+    await inngest_client.send(
+        events=[
+            inngest.Event(
+                name="validation/requested",
+                data={"validation_id": v.id},
+            )
+        ]
+    )
     return v
 
 

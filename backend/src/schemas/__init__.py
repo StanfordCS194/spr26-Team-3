@@ -56,8 +56,10 @@ class CheckResult(BaseModel):
 class ValidationOut(ORMModel):
     id: str
     reconstruction_id: str
-    report: dict
+    report: dict | None
     user_override: bool
+    status: str
+    error: str | None
     created_at: datetime
 
 
@@ -65,10 +67,12 @@ class BuildOut(ORMModel):
     id: str
     project_id: str
     reconstruction_id: str | None
-    mjcf_path: str
-    n_hulls: int
-    bounds: dict
-    spawn_region: dict
+    mjcf_path: str | None
+    n_hulls: int | None
+    bounds: dict | None
+    spawn_region: dict | None
+    status: str
+    error: str | None
     created_at: datetime
 
 
@@ -99,7 +103,9 @@ class RunOut(ORMModel):
     id: str
     policy_id: str | None
     baseline: str | None
-    episodes: int
-    successes: int
-    avg_reward: float
+    status: str
+    error: str | None
+    episodes: int | None
+    successes: int | None
+    avg_reward: float | None
     created_at: datetime

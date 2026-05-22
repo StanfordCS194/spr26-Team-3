@@ -2,12 +2,37 @@
 @import "@fontsource-variable/geist";
 @import "@fontsource-variable/geist-mono";
 
+/*
+ * Tailwind v4 only generates utilities (bg-foreground, text-background, etc.)
+ * for tokens registered in @theme. The raw :root variables below provide the
+ * runtime values; this block tells Tailwind which class names to emit.
+ */
 @theme {
   --font-sans: "Geist Variable", system-ui, sans-serif;
   --font-mono: "Geist Mono Variable", ui-monospace, monospace;
   --radius: 2px;
   --tracking-tight: -0.012em;
   --tracking-wider: 0.08em;
+
+  --color-background: oklch(0.085 0 0);
+  --color-foreground: oklch(0.96 0 0);
+  --color-card: oklch(0.115 0 0);
+  --color-card-foreground: oklch(0.96 0 0);
+  --color-popover: oklch(0.115 0 0);
+  --color-popover-foreground: oklch(0.96 0 0);
+  --color-primary: oklch(0.72 0.18 230);
+  --color-primary-foreground: oklch(0.08 0 0);
+  --color-secondary: oklch(0.16 0 0);
+  --color-secondary-foreground: oklch(0.96 0 0);
+  --color-muted: oklch(0.14 0 0);
+  --color-muted-foreground: oklch(0.58 0 0);
+  --color-accent: oklch(0.17 0 0);
+  --color-accent-foreground: oklch(0.96 0 0);
+  --color-destructive: oklch(0.65 0.22 25);
+  --color-destructive-foreground: oklch(0.96 0 0);
+  --color-border: oklch(0.18 0 0);
+  --color-input: oklch(0.18 0 0);
+  --color-ring: oklch(0.72 0.18 230);
 }
 
 /*
