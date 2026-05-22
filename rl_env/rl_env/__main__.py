@@ -4,6 +4,12 @@ Subcommands:
   build  MESH [--out DIR]      mesh -> MJCF + collision hulls
   run    MJCF [--episodes N]   load MJCF, roll random policy, print stats
   demo                          procedural sample room -> full pipeline -> rollout
+  train  MJCF [--steps N]       train PPO
+  play   MJCF --ckpt ZIP        evaluate trained policy
+
+Web UI removed in the worldscan-v2-video-product change; the new FastAPI
+backend under backend/ serves the same routes plus video reconstruction
+and validation. This module remains as a headless CLI.
 """
 from __future__ import annotations
 
@@ -89,13 +95,6 @@ def _cmd_run(args: argparse.Namespace) -> int:
     print(f"  avg reward: {total_reward / args.episodes:.2f}")
     print(f"  total steps: {total_steps}  ({total_steps / max(elapsed, 1e-6):.0f} steps/s)")
     env.close()
-    return 0
-
-
-def _cmd_serve(args: argparse.Namespace) -> int:
-    from rl_env.server import serve
-
-    serve(host=args.host, port=args.port)
     return 0
 
 
@@ -189,11 +188,6 @@ def main(argv: list[str] | None = None) -> int:
     pd.add_argument("--seed", type=int, default=0)
     pd.add_argument("--policy", choices=["random", "greedy"], default="greedy")
     pd.set_defaults(func=_cmd_demo)
-
-    ps = sub.add_parser("serve", help="start local Flask server (browser UI)")
-    ps.add_argument("--host", default="127.0.0.1")
-    ps.add_argument("--port", type=int, default=5174)
-    ps.set_defaults(func=_cmd_serve)
 
     pt = sub.add_parser("train", help="train PPO on a built MJCF")
     pt.add_argument("mjcf", help="path to scene.xml")
