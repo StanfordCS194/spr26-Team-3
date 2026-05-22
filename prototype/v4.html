@@ -1,0 +1,2161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>WorldScan</title>
+<style>
+  :root {
+    --bg: #0b0d10;
+    --panel: #12161b;
+    --panel-2: #181d24;
+    --border: #232a33;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --accent: #5eead4;
+    --accent-2: #7aa2f7;
+    --warn: #f59e0b;
+    --err: #f87171;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    overflow: hidden;
+  }
+  header {
+    border-bottom: 1px solid var(--border);
+    padding: 14px 24px;
+    display: flex;
+    align-items: center;
+    height: 56px;
+  }
+  .logo { font-size: 18px; font-weight: 700; letter-spacing: -0.02em; }
+  .logo span { color: var(--accent); }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 340px 1fr;
+    height: calc(100vh - 56px);
+  }
+  .sidebar {
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 20px;
+  }
+  .viewer { position: relative; background: #000; }
+  #canvas { width: 100%; height: 100%; display: block; }
+
+  .tabs {
+    display: flex;
+    gap: 4px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 4px;
+    margin-bottom: 20px;
+  }
+  .tab {
+    flex: 1;
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-size: 13px;
+    text-align: center;
+    cursor: pointer;
+    color: var(--muted);
+    border: none;
+    background: transparent;
+    font-family: inherit;
+  }
+  .tab.active { background: var(--bg); color: var(--text); }
+  .tab:hover:not(.active) { color: var(--text); }
+
+  .panel-section { margin-bottom: 22px; }
+  .panel-section h3 {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    margin: 0 0 10px;
+  }
+
+  .drop {
+    display: block;
+    border: 2px dashed #2c3441;
+    border-radius: 12px;
+    padding: 22px 16px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 12.5px;
+    line-height: 1.5;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s, color 0.15s;
+    user-select: none;
+  }
+  .drop:hover, .drop.drag {
+    border-color: var(--accent);
+    background: rgba(94,234,212,0.05);
+    color: var(--text);
+  }
+  .drop strong {
+    color: var(--text);
+    display: block;
+    margin-bottom: 2px;
+    font-weight: 600;
+    font-size: 13px;
+  }
+
+  .btn {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    cursor: pointer;
+    font-family: inherit;
+    width: 100%;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .btn:hover:not(:disabled) { background: #1d2330; border-color: #2c3441; }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .btn.primary { background: var(--accent); color: #062e26; border-color: var(--accent); font-weight: 600; }
+  .btn.primary:hover:not(:disabled) { background: #7af0db; }
+  .btn-row { display: flex; gap: 8px; }
+  .btn-row .btn { flex: 1; }
+
+  .row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 13px;
+    padding: 6px 0;
+    gap: 12px;
+  }
+  .row label { color: var(--muted); white-space: nowrap; }
+  .row input[type=range] { flex: 1; min-width: 0; accent-color: var(--accent); }
+  .row select, .row input[type=text] {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-family: inherit;
+  }
+
+  .stats {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    font-size: 12px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    color: var(--muted);
+    line-height: 1.7;
+  }
+  .stats .k { color: var(--text); }
+
+  .status-bar {
+    position: absolute;
+    bottom: 16px; left: 16px; right: 16px;
+    background: rgba(18,22,27,0.92);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 12px;
+    color: var(--muted);
+    backdrop-filter: blur(8px);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .status-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--muted); flex-shrink: 0;
+  }
+  .status-dot.busy { background: var(--warn); animation: pulse 1.2s infinite; }
+  .status-dot.ok { background: var(--accent); }
+  .status-dot.err { background: var(--err); }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  .progress {
+    height: 4px;
+    background: var(--panel-2);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-top: 10px;
+    display: none;
+  }
+  .progress.show { display: block; }
+  .progress-bar { height: 100%; background: var(--accent); width: 0%; transition: width 0.2s; }
+
+  .thumbs {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+    margin-top: 12px;
+  }
+  .thumb {
+    position: relative;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    aspect-ratio: 1 / 1;
+    background: #000;
+  }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .thumb.fused { border-color: rgba(94,234,212,0.7); }
+  .thumb.unfused { border-color: rgba(245,158,11,0.7); }
+  .thumb .x {
+    position: absolute;
+    top: 4px; right: 4px;
+    width: 18px; height: 18px;
+    background: rgba(0,0,0,0.7);
+    color: var(--text);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px;
+    cursor: pointer;
+    line-height: 1;
+  }
+  .thumb .x:hover { background: var(--err); }
+  .thumb .badge-num {
+    position: absolute;
+    bottom: 4px; left: 4px;
+    background: rgba(0,0,0,0.7);
+    color: var(--text);
+    font-size: 9px;
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+
+  .overlay-controls {
+    position: absolute;
+    top: 16px; right: 16px;
+    background: rgba(18,22,27,0.92);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 11px;
+    color: var(--muted);
+    backdrop-filter: blur(8px);
+    line-height: 1.7;
+  }
+  .overlay-controls span { color: var(--text); font-family: ui-monospace, monospace; font-size: 10px; }
+
+  .replay {
+    margin-top: 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel-2);
+    padding: 10px;
+  }
+  .replay canvas {
+    width: 100%;
+    height: 180px;
+    display: block;
+    background: #0e1116;
+    border-radius: 6px;
+    border: 1px solid #202734;
+  }
+  .replay-chart {
+    width: 100%;
+    height: 96px;
+    display: block;
+    margin-top: 8px;
+    background: #0e1116;
+    border-radius: 6px;
+    border: 1px solid #202734;
+  }
+  .replay-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .replay-controls {
+    margin-top: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .replay-controls button {
+    width: auto;
+    padding: 4px 10px;
+    font-size: 12px;
+  }
+  .replay-controls input[type=range] {
+    flex: 1;
+    min-width: 0;
+    accent-color: var(--accent-2);
+  }
+
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">World<span>Scan</span> <small style="font-size:11px;color:var(--muted);font-weight:400;margin-left:8px;">v4</small></div>
+</header>
+
+<div class="layout">
+  <aside class="sidebar">
+    <div class="tabs">
+      <button class="tab active" data-tab="depth">Photo → 3D</button>
+      <button class="tab" data-tab="splat">Scene Viewer</button>
+    </div>
+
+    <!-- Photo → 3D tab -->
+    <div id="tab-depth">
+      <div class="panel-section">
+        <h3>Photos</h3>
+        <label class="drop" id="drop-image">
+          <strong>Drop photos here</strong>
+          or click to choose (one or many)
+          <input type="file" id="file-image" accept="image/*" multiple style="display:none" />
+        </label>
+        <div id="photo-count" style="font-size:11px; color:var(--muted); margin-top:6px; text-align:center;"></div>
+        <div class="thumbs" id="thumbs"></div>
+        <div class="progress" id="depth-progress"><div class="progress-bar" id="depth-progress-bar"></div></div>
+      </div>
+
+      <div class="panel-section">
+        <button class="btn primary" id="btn-reconstruct" disabled>Reconstruct</button>
+      </div>
+
+      <div class="panel-section">
+        <h3>View</h3>
+        <div class="row">
+          <label>Mode</label>
+          <select id="view-mode">
+            <option value="mesh">Mesh</option>
+            <option value="points">Points</option>
+          </select>
+        </div>
+        <div class="row">
+          <label>Point size</label>
+          <input type="range" id="point-size" min="1" max="8" step="0.5" value="2.5" />
+        </div>
+        <div class="row">
+          <label>Depth scale</label>
+          <input type="range" id="depth-scale" min="0.5" max="5" step="0.1" value="1" />
+        </div>
+        <div class="row">
+          <label>FOV</label>
+          <input type="range" id="fov" min="40" max="100" step="1" value="60" />
+        </div>
+      </div>
+
+      <div class="panel-section">
+        <h3>Export</h3>
+        <div class="btn-row">
+          <button class="btn" id="btn-export-ply" disabled>PLY</button>
+          <button class="btn" id="btn-export-obj" disabled>OBJ</button>
+        </div>
+      </div>
+
+      <div class="panel-section">
+        <h3>RL Env <span id="rl-server-state" style="font-size:10px; color:var(--muted); font-weight:normal;">(checking…)</span></h3>
+        <div class="row">
+          <label>Up axis</label>
+          <select id="rl-up">
+            <option value="auto">auto</option>
+            <option value="y" selected>y</option>
+            <option value="z">z</option>
+          </select>
+        </div>
+        <div class="row">
+          <label>Diag (m)</label>
+          <input type="number" id="rl-diag" value="6" step="0.5" min="0" style="background:var(--panel-2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-size:12px;width:80px;" />
+        </div>
+        <button class="btn primary" id="btn-rl-build" disabled style="margin-top:8px;">Build RL env</button>
+        <div class="progress" id="rl-build-progress"><div class="progress-bar" id="rl-build-progress-bar"></div></div>
+        <div id="rl-build-result" style="font-size:11px; color:var(--muted); margin-top:8px; line-height:1.6;"></div>
+
+        <div style="margin-top:14px;">
+          <div class="row">
+            <label>Train steps</label>
+            <input type="number" id="rl-train-steps" value="100000" min="10000" max="2000000" step="10000" style="background:var(--panel-2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-size:12px;width:90px;" />
+          </div>
+          <button class="btn" id="btn-rl-train" disabled style="margin-top:8px;">Train PPO</button>
+          <div id="rl-train-result" style="font-size:11px; color:var(--muted); margin-top:8px; line-height:1.6;"></div>
+        </div>
+
+        <div style="margin-top:14px;">
+          <div class="row">
+            <label>Policy</label>
+            <select id="rl-policy">
+              <option value="greedy" selected>greedy</option>
+              <option value="random">random</option>
+              <option value="ppo">ppo (trained)</option>
+            </select>
+          </div>
+          <div class="row">
+            <label>Episodes</label>
+            <input type="number" id="rl-episodes" value="5" min="1" max="50" style="background:var(--panel-2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-size:12px;width:60px;" />
+          </div>
+          <div class="row">
+            <label>Max steps</label>
+            <input type="number" id="rl-steps" value="300" min="50" max="2000" step="50" style="background:var(--panel-2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-size:12px;width:80px;" />
+          </div>
+          <button class="btn" id="btn-rl-run" disabled style="margin-top:8px;">Run rollout</button>
+          <button class="btn" id="btn-rl-benchmark" disabled style="margin-top:8px;">Benchmark policies</button>
+          <button class="btn" id="btn-rl-render" disabled style="margin-top:8px;">Capture render</button>
+          <div class="replay" id="rl-render-box" style="display:none;">
+            <div class="replay-head">
+              <span id="rl-render-title">Render</span>
+              <span id="rl-render-metrics">frame 0/0</span>
+            </div>
+            <canvas id="rl-render-canvas" width="320" height="240" style="width:100%; border-radius:6px; border:1px solid #202734; display:block; background:#0e1116;"></canvas>
+            <div class="replay-controls">
+              <button class="btn" id="rl-render-play">Play</button>
+              <input type="range" id="rl-render-slider" min="0" max="0" step="1" value="0" />
+            </div>
+          </div>
+          <div id="rl-run-result" style="font-size:11px; color:var(--muted); margin-top:8px; line-height:1.5; max-height:160px; overflow-y:auto;"></div>
+          <div id="rl-benchmark-result" style="font-size:11px; color:var(--muted); margin-top:8px; line-height:1.5; max-height:220px; overflow-y:auto;"></div>
+          <div class="replay" id="rl-replay" style="display:none;">
+            <div class="replay-head">
+              <span id="rl-replay-title">Replay</span>
+              <span id="rl-replay-metrics">step 0/0</span>
+            </div>
+            <canvas id="rl-replay-canvas" width="520" height="280"></canvas>
+            <canvas id="rl-replay-chart" class="replay-chart" width="520" height="120"></canvas>
+            <div class="replay-controls">
+              <button class="btn" id="rl-replay-play">Play</button>
+              <input type="range" id="rl-replay-slider" min="0" max="0" step="1" value="0" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel-section">
+        <h3>Stats</h3>
+        <div class="stats">
+          <div>photos: <span class="k" id="stat-photos">—</span></div>
+          <div>fused: <span class="k" id="stat-fused">—</span></div>
+          <div>vertices: <span class="k" id="stat-verts">—</span></div>
+          <div>triangles: <span class="k" id="stat-tris">—</span></div>
+          <div>time: <span class="k" id="stat-time">—</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Scene Viewer tab -->
+    <div id="tab-splat" class="hidden">
+      <div class="panel-section">
+        <h3>Scene</h3>
+        <div class="row">
+          <label>Source</label>
+          <select id="splat-scene">
+            <option value="https://huggingface.co/cakewalk/splat-data/resolve/main/nike.splat">Nike</option>
+            <option value="https://huggingface.co/cakewalk/splat-data/resolve/main/plush.splat">Plush toy</option>
+            <option value="https://huggingface.co/cakewalk/splat-data/resolve/main/train.splat">Train</option>
+            <option value="custom">Custom…</option>
+          </select>
+        </div>
+        <input type="text" id="splat-url" placeholder="https://…/scene.splat" style="width:100%; margin-top:8px; display:none; background: var(--panel-2); border: 1px solid var(--border); color: var(--text); padding: 6px 10px; border-radius: 6px; font-size: 12px;" />
+        <label class="drop" id="drop-splat" style="margin-top:8px; display:none">
+          <strong>Drop a .splat / .ply file</strong>
+          or click
+          <input type="file" id="file-splat" accept=".splat,.ply" style="display:none" />
+        </label>
+        <button class="btn primary" id="btn-load-splat" style="margin-top:10px">Load scene</button>
+        <div class="progress" id="splat-progress"><div class="progress-bar" id="splat-progress-bar"></div></div>
+      </div>
+
+      <div class="panel-section">
+        <h3>Render</h3>
+        <div class="row">
+          <label>Scale</label>
+          <input type="range" id="splat-scale" min="0.5" max="2" step="0.05" value="1" />
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <main class="viewer">
+    <canvas id="canvas"></canvas>
+    <div class="overlay-controls">
+      <div>drag <span>orbit</span></div>
+      <div>shift+drag <span>pan</span></div>
+      <div>wheel <span>zoom</span></div>
+      <div>r <span>reset view</span></div>
+    </div>
+    <div class="status-bar">
+      <div class="status-dot" id="status-dot"></div>
+      <div id="status-text">Ready.</div>
+    </div>
+  </main>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.1/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const $ = (id) => document.getElementById(id);
+const yieldUI = () => new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));
+const setStatus = (text, kind = 'idle') => {
+  $('status-text').textContent = text;
+  const dot = $('status-dot');
+  dot.className = 'status-dot' + (kind === 'busy' ? ' busy' : kind === 'ok' ? ' ok' : kind === 'err' ? ' err' : '');
+};
+
+// Lazy transformers.js
+let pipeline = null;
+let env = null;
+async function loadTransformers() {
+  if (pipeline) return;
+  const mod = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.2');
+  pipeline = mod.pipeline;
+  env = mod.env;
+  env.allowLocalModels = false;
+  env.useBrowserCache = true;
+}
+
+// ---------- Three.js scene ----------
+const canvas = $('canvas');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x000000);
+
+const camera = new THREE.PerspectiveCamera(50, 1, 0.01, 1000);
+camera.position.set(0, 0, 4);
+
+const controls = new OrbitControls(camera, canvas);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+dir.position.set(2, 4, 3);
+scene.add(dir);
+
+const grid = new THREE.GridHelper(20, 20, 0x222222, 0x1a1a1a);
+grid.position.y = -2;
+scene.add(grid);
+
+let currentObject = null;
+let lastReconstructions = [];
+
+function clearScene() {
+  if (currentObject) {
+    scene.remove(currentObject);
+    currentObject.geometry?.dispose();
+    if (Array.isArray(currentObject.material)) currentObject.material.forEach(m => m.dispose());
+    else currentObject.material?.dispose();
+    currentObject = null;
+  }
+}
+
+function resize() {
+  const rect = canvas.getBoundingClientRect();
+  renderer.setSize(rect.width, rect.height, false);
+  camera.aspect = rect.width / rect.height;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+resize();
+
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'r' || e.key === 'R') {
+    if (currentObject) frameObject(currentObject);
+  }
+});
+
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+
+// ---------- Tabs ----------
+document.querySelectorAll('.tab').forEach(t => {
+  t.onclick = () => {
+    document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+    $('tab-depth').classList.toggle('hidden', t.dataset.tab !== 'depth');
+    $('tab-splat').classList.toggle('hidden', t.dataset.tab !== 'splat');
+  };
+});
+
+// ---------- Device detection ----------
+let _device = 'wasm';
+(async () => {
+  if (typeof navigator !== 'undefined' && navigator.gpu) {
+    try { const a = await navigator.gpu.requestAdapter(); if (a) _device = 'webgpu'; } catch (e) {}
+  }
+})();
+
+// ---------- Multi-image upload ----------
+let inputImages = [];
+let _nextId = 1;
+
+const dropImage = $('drop-image');
+const fileImage = $('file-image');
+
+dropImage.onclick = () => fileImage.click();
+['dragenter', 'dragover'].forEach(e => dropImage.addEventListener(e, ev => { ev.preventDefault(); dropImage.classList.add('drag'); }));
+['dragleave', 'drop'].forEach(e => dropImage.addEventListener(e, ev => { ev.preventDefault(); dropImage.classList.remove('drag'); }));
+dropImage.addEventListener('drop', ev => {
+  const files = Array.from(ev.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+  files.forEach(addImageFile);
+});
+fileImage.onchange = () => {
+  Array.from(fileImage.files || []).forEach(addImageFile);
+  fileImage.value = '';
+};
+
+function addImageFile(file) {
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    const id = _nextId++;
+    inputImages.push({ id, image: img, name: file.name, src: url, fused: null });
+    renderThumbs();
+    updateButtons();
+    setStatus(`${inputImages.length} photo${inputImages.length === 1 ? '' : 's'} ready.`, 'ok');
+  };
+  img.onerror = () => setStatus(`Failed to load ${file.name}.`, 'err');
+  img.src = url;
+}
+
+function renderThumbs() {
+  const container = $('thumbs');
+  container.innerHTML = '';
+  inputImages.forEach((it, idx) => {
+    const div = document.createElement('div');
+    let cls = 'thumb';
+    if (it.fused === true) cls += ' fused';
+    else if (it.fused === false) cls += ' unfused';
+    div.className = cls;
+    const im = document.createElement('img');
+    im.src = it.src;
+    div.appendChild(im);
+    const num = document.createElement('div');
+    num.className = 'badge-num';
+    num.textContent = idx + 1;
+    div.appendChild(num);
+    const x = document.createElement('div');
+    x.className = 'x';
+    x.textContent = '×';
+    x.onclick = (e) => {
+      e.stopPropagation();
+      inputImages = inputImages.filter(i => i.id !== it.id);
+      renderThumbs();
+      updateButtons();
+      if (inputImages.length === 0) {
+        clearScene();
+        lastReconstructions = [];
+        $('btn-export-ply').disabled = true;
+        $('btn-export-obj').disabled = true;
+        $('btn-rl-build').disabled = true;
+        ['stat-photos','stat-fused','stat-verts','stat-tris','stat-time'].forEach(id => $(id).textContent = '—');
+        setStatus('Ready.');
+      }
+    };
+    div.appendChild(x);
+    container.appendChild(div);
+  });
+}
+
+function updateButtons() {
+  $('btn-reconstruct').disabled = inputImages.length === 0;
+  $('photo-count').textContent = inputImages.length === 0 ? '' : `${inputImages.length} photo${inputImages.length === 1 ? '' : 's'} loaded`;
+}
+
+// ---------- Depth model (browser fallback) ----------
+// In-browser Depth-Anything-V2 outputs *relative* depth in arbitrary units.
+// When the rl_env server is online we prefer /api/depth which runs a metric
+// fine-tune of the same architecture and returns depth in real meters — that
+// makes cross-photo fusion much better behaved (see serverDepth below).
+let depthEstimator = null;
+async function ensureDepthModel() {
+  if (depthEstimator) return depthEstimator;
+  setStatus('Loading depth model (one-time download)…', 'busy');
+  $('depth-progress').classList.add('show');
+  const bar = $('depth-progress-bar');
+  const cb = (data) => {
+    if (data.status === 'progress' && typeof data.progress === 'number') {
+      bar.style.width = `${data.progress}%`;
+    }
+  };
+  try {
+    depthEstimator = await pipeline('depth-estimation', 'onnx-community/depth-anything-v2-small', {
+      device: _device, progress_callback: cb
+    });
+  } catch (e) {
+    console.warn('Primary model failed, falling back:', e);
+    depthEstimator = await pipeline('depth-estimation', 'Xenova/depth-anything-small-hf', {
+      device: _device, progress_callback: cb
+    });
+  }
+  $('depth-progress').classList.remove('show');
+  bar.style.width = '0%';
+  return depthEstimator;
+}
+
+// Server-side metric depth via POST /api/depth. Returns {data: Float32Array,
+// w, h} where data is per-pixel depth in METERS. Falls back is the caller's
+// responsibility — this throws if the server returns an error.
+async function serverDepth(image) {
+  // Re-encode the source <img> as JPEG via a canvas so multipart upload works
+  // regardless of where the original image came from (drag-drop, file picker).
+  const canvas = document.createElement('canvas');
+  canvas.width = image.naturalWidth;
+  canvas.height = image.naturalHeight;
+  canvas.getContext('2d').drawImage(image, 0, 0);
+  const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.9));
+  const form = new FormData();
+  form.append('image', blob, 'photo.jpg');
+  const resp = await fetch('/api/depth', { method: 'POST', body: form });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    throw new Error(`/api/depth ${resp.status}: ${text}`);
+  }
+  const w = parseInt(resp.headers.get('X-Depth-Width'), 10);
+  const h = parseInt(resp.headers.get('X-Depth-Height'), 10);
+  const buf = await resp.arrayBuffer();
+  return { data: new Float32Array(buf), w, h };
+}
+
+// ---------- Reconstruction ----------
+$('btn-reconstruct').onclick = async () => {
+  if (inputImages.length === 0) return;
+  $('btn-reconstruct').disabled = true;
+  try {
+    const useServerDepth = rlServerOnline;
+    if (!useServerDepth) {
+      setStatus('Loading depth model…', 'busy');
+      await yieldUI();
+      await loadTransformers();
+      await ensureDepthModel();
+    }
+
+    const t0 = performance.now();
+    const recons = [];
+    for (let i = 0; i < inputImages.length; i++) {
+      const it = inputImages[i];
+      setStatus(`Estimating depth ${i + 1} of ${inputImages.length}${useServerDepth ? ' (server, metric)' : ''}…`, 'busy');
+      await yieldUI();
+      let depthData, dw, dh, absolute;
+      if (useServerDepth) {
+        const d = await serverDepth(it.image);
+        depthData = d.data; dw = d.w; dh = d.h; absolute = true;
+      } else {
+        const result = await depthEstimator(it.src);
+        const tensor = result.predicted_depth;
+        const dims = tensor.dims;
+        dh = dims[dims.length - 2];
+        dw = dims[dims.length - 1];
+        depthData = tensor.data;
+        absolute = false;
+      }
+      await yieldUI();
+      const recon = backProject(it.image, depthData, dw, dh, { absolute });
+      recon.image = it.image;
+      recon.rawDepth = depthData;  // kept for depth-calibration re-back-projection in fuseReconstructions
+      recon.absolute = absolute;
+      recons.push(recon);
+      let mn = Infinity, mx = -Infinity;
+      for (let p = 0; p < depthData.length; p++) {
+        const v = depthData[p];
+        if (v < mn) mn = v;
+        if (v > mx) mx = v;
+      }
+      const ds = parseFloat($('depth-scale').value);
+      console.log(`[depth] photo ${i + 1}: ${dw}x${dh} ${absolute ? 'METRIC (m)' : 'relative'} raw range ${mn.toFixed(2)}–${mx.toFixed(2)}, depthScale slider=${ds}`);
+      await yieldUI();
+    }
+
+    if (recons.length > 1) {
+      await fuseReconstructions(recons);
+    } else {
+      recons[0].transform = identity4();
+      inputImages[0].fused = null;
+    }
+
+    const t1 = performance.now();
+    lastReconstructions = recons;
+    renderReconstructions();
+
+    let totalV = 0, totalT = 0, fusedCount = 0;
+    for (let i = 0; i < recons.length; i++) {
+      totalV += recons[i].positions.length / 3;
+      totalT += recons[i].indices.length / 3;
+      if (i === 0 || recons[i].fusionOK) fusedCount++;
+    }
+    $('stat-photos').textContent = recons.length;
+    $('stat-fused').textContent = recons.length > 1 ? `${fusedCount} / ${recons.length}` : '—';
+    $('stat-verts').textContent = totalV.toLocaleString();
+    $('stat-tris').textContent = totalT.toLocaleString();
+    $('stat-time').textContent = `${((t1 - t0) / 1000).toFixed(1)} s`;
+    renderThumbs();
+
+    $('btn-export-ply').disabled = false;
+    $('btn-export-obj').disabled = false;
+    $('btn-rl-build').disabled = !rlServerOnline;
+
+    if (recons.length === 1) setStatus('Done.', 'ok');
+    else if (fusedCount === recons.length) setStatus(`Done. All ${recons.length} photos fused.`, 'ok');
+    else setStatus(`Done. ${fusedCount} of ${recons.length} fused — others placed beside (no overlap detected).`, 'ok');
+  } catch (e) {
+    console.error(e);
+    setStatus(`Error: ${e.message}`, 'err');
+  } finally {
+    $('btn-reconstruct').disabled = false;
+  }
+};
+
+// opts.absolute: true -> depthData is metric meters (server /api/depth); false
+//   -> depthData is per-image relative output of in-browser Depth-Anything that
+//   we squash to [0.4, 2.0]*depthScale.
+// opts.calib: optional {k, c} that linearly remaps z via z' = k*z + c (used by
+//   fuseReconstructions to align cross-photo depth scales). In absolute mode k
+//   should usually stay near 1 since metric depths are already consistent.
+function backProject(img, depthData, dw, dh, opts = {}) {
+  const absolute = opts.absolute === true;
+  const off = document.createElement('canvas');
+  off.width = dw; off.height = dh;
+  const ictx = off.getContext('2d');
+  ictx.drawImage(img, 0, 0, dw, dh);
+  const colorPix = ictx.getImageData(0, 0, dw, dh).data;
+
+  let mn = Infinity, mx = -Infinity;
+  if (!absolute) {
+    for (const v of depthData) { if (v < mn) mn = v; if (v > mx) mx = v; }
+  }
+  const range = (mx - mn) || 1;
+
+  const fov = parseFloat($('fov').value) * Math.PI / 180;
+  const fx = dw / (2 * Math.tan(fov / 2));
+  const fy = fx;
+  const cx = dw / 2, cy = dh / 2;
+  const depthScale = parseFloat($('depth-scale').value);
+  const calK = opts.calib ? opts.calib.k : 1;
+  const calC = opts.calib ? opts.calib.c : 0;
+
+  const positions = new Float32Array(dw * dh * 3);
+  const colors = new Float32Array(dw * dh * 3);
+  const zArr = new Float32Array(dw * dh);
+
+  for (let v = 0; v < dh; v++) {
+    for (let u = 0; u < dw; u++) {
+      const i = v * dw + u;
+      let z;
+      if (absolute) {
+        z = depthData[i] * depthScale;
+      } else {
+        const t = (depthData[i] - mn) / range;
+        z = (0.4 + (1 - t) * 1.6) * depthScale;
+      }
+      z = calK * z + calC;
+      zArr[i] = z;
+      positions[i*3]     = (u - cx) * z / fx;
+      positions[i*3 + 1] = -(v - cy) * z / fy;
+      positions[i*3 + 2] = -z;
+      const r = colorPix[i*4], g = colorPix[i*4 + 1], b = colorPix[i*4 + 2];
+      colors[i*3] = r / 255; colors[i*3 + 1] = g / 255; colors[i*3 + 2] = b / 255;
+    }
+  }
+
+  const indices = [];
+  // In metric mode use an absolute jump (~30cm = different surfaces); in
+  // relative mode keep the existing fraction-of-scale rule.
+  const discontinuity = (absolute ? 0.3 : 0.18 * depthScale) * Math.abs(calK);
+  for (let v = 0; v < dh - 1; v++) {
+    for (let u = 0; u < dw - 1; u++) {
+      const i00 = v * dw + u;
+      const i10 = v * dw + (u + 1);
+      const i01 = (v + 1) * dw + u;
+      const i11 = (v + 1) * dw + (u + 1);
+      const z00 = zArr[i00], z10 = zArr[i10], z01 = zArr[i01], z11 = zArr[i11];
+      const span = Math.max(z00, z10, z01, z11) - Math.min(z00, z10, z01, z11);
+      if (span > discontinuity) continue;
+      indices.push(i00, i11, i10);
+      indices.push(i00, i01, i11);
+    }
+  }
+
+  return { positions, colors, indices: new Uint32Array(indices), w: dw, h: dh };
+}
+
+// ============================================================
+// Learned feature matching: SuperPoint extractor + LightGlue matcher
+// (ONNX models from fabio-sim/LightGlue-ONNX, run via onnxruntime-web)
+// ============================================================
+// Served by rl_env.server via /api/models/<name>, which proxies the GitHub release
+// asset and caches it on disk. GitHub release assets lack CORS, so we go same-origin.
+const SP_URL = '/api/models/superpoint';
+const LG_URL = '/api/models/superpoint_lightglue';
+const SP_MAX_DIM = 1536;  // resize photos so max dim <= this before SuperPoint (multiple-of-8 enforced)
+
+let _ort = null;
+async function loadOrt() {
+  if (_ort) return _ort;
+  const mod = await import('https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.webgpu.min.mjs');
+  mod.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/';
+  _ort = mod;
+  return mod;
+}
+
+async function fetchModelWithProgress(url, onFraction) {
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`fetch ${url}: ${resp.status}`);
+  const total = +resp.headers.get('content-length') || 0;
+  const reader = resp.body.getReader();
+  const chunks = [];
+  let received = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    received += value.length;
+    if (total && onFraction) onFraction(received / total);
+  }
+  const buf = new Uint8Array(received);
+  let pos = 0;
+  for (const c of chunks) { buf.set(c, pos); pos += c.length; }
+  return buf;
+}
+
+let superpointSession = null;
+let lightglueSession = null;
+
+async function ensureMatchingModels() {
+  if (superpointSession && lightglueSession) return;
+  const ort = await loadOrt();
+  const providers = _device === 'webgpu' ? ['webgpu', 'wasm'] : ['wasm'];
+  const bar = $('depth-progress-bar');
+  $('depth-progress').classList.add('show');
+  try {
+    if (!superpointSession) {
+      setStatus('Loading feature extractor (one-time download, ~5 MB)…', 'busy');
+      bar.style.width = '0%';
+      const bytes = await fetchModelWithProgress(SP_URL, (f) => { bar.style.width = `${(f * 100).toFixed(0)}%`; });
+      superpointSession = await ort.InferenceSession.create(bytes, { executionProviders: providers });
+    }
+    if (!lightglueSession) {
+      setStatus('Loading feature matcher (one-time download, ~47 MB)…', 'busy');
+      bar.style.width = '0%';
+      const bytes = await fetchModelWithProgress(LG_URL, (f) => { bar.style.width = `${(f * 100).toFixed(0)}%`; });
+      lightglueSession = await ort.InferenceSession.create(bytes, { executionProviders: providers });
+    }
+  } finally {
+    $('depth-progress').classList.remove('show');
+    bar.style.width = '0%';
+  }
+}
+
+// Resize+grayscale+normalize an image for SuperPoint. Returns the f32 [1,1,H,W]
+// tensor plus the (w, h) it was run at, so we can scale keypoints back.
+function preprocessForSuperPoint(image) {
+  const scale = Math.min(SP_MAX_DIM / image.width, SP_MAX_DIM / image.height, 1);
+  // round each dim to nearest multiple of 8 (SuperPoint subsamples by 8); keep >= 32
+  const w = Math.max(32, Math.round(image.width * scale / 8) * 8);
+  const h = Math.max(32, Math.round(image.height * scale / 8) * 8);
+  const canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(image, 0, 0, w, h);
+  const data = ctx.getImageData(0, 0, w, h).data;
+  const gray = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    const r = data[i*4], g = data[i*4 + 1], b = data[i*4 + 2];
+    gray[i] = (r * 0.299 + g * 0.587 + b * 0.114) / 255;
+  }
+  return { tensor: gray, w, h };
+}
+
+// Run SuperPoint on `image`, returning {kpts, desc, gridX, gridY, n}.
+//   kpts:  Float32Array(n*2) NORMALIZED to ~[-1, 1] for LightGlue, via
+//          (raw - size/2) / (max(W,H)/2) — the canonical LightGlue normalization.
+//   desc:  Float32Array(n*256)
+//   gridX, gridY: Int32Array(n) clamped indices into the (dw x dh) depth grid
+async function extractSuperPoint(image, dw, dh) {
+  const ort = await loadOrt();
+  const { tensor, w: spw, h: sph } = preprocessForSuperPoint(image);
+  const input = new ort.Tensor('float32', tensor, [1, 1, sph, spw]);
+  const out = await superpointSession.run({ image: input });
+  const kptsRaw = out.keypoints.data;  // BigInt64Array [2N] interleaved (x, y) in SuperPoint pixels
+  const descRaw = out.descriptors.data; // Float32Array [N*256]
+  const N = descRaw.length / 256;
+  const kpts = new Float32Array(N * 2);
+  const gridX = new Int32Array(N);
+  const gridY = new Int32Array(N);
+  const sx = dw / spw, sy = dh / sph;
+  const shiftX = spw / 2, shiftY = sph / 2;
+  const normScale = Math.max(spw, sph) / 2;
+  for (let i = 0; i < N; i++) {
+    const x = Number(kptsRaw[i * 2]);
+    const y = Number(kptsRaw[i * 2 + 1]);
+    kpts[i * 2]     = (x - shiftX) / normScale;
+    kpts[i * 2 + 1] = (y - shiftY) / normScale;
+    gridX[i] = Math.min(dw - 1, Math.max(0, Math.floor(x * sx)));
+    gridY[i] = Math.min(dh - 1, Math.max(0, Math.floor(y * sy)));
+  }
+  return { kpts, desc: new Float32Array(descRaw), gridX, gridY, n: N, spw, sph };
+}
+
+// Match two SuperPoint feature sets with LightGlue. Returns [{a, b, score}]
+// where `a` indexes featA's keypoints and `b` indexes featB's keypoints
+// (matching the old matchDescriptors(featA, featB) convention).
+async function matchLightGlue(featA, featB) {
+  if (featA.n === 0 || featB.n === 0) return [];
+  const ort = await loadOrt();
+  const k0 = new ort.Tensor('float32', featA.kpts, [1, featA.n, 2]);
+  const k1 = new ort.Tensor('float32', featB.kpts, [1, featB.n, 2]);
+  const d0 = new ort.Tensor('float32', featA.desc, [1, featA.n, 256]);
+  const d1 = new ort.Tensor('float32', featB.desc, [1, featB.n, 256]);
+  const out = await lightglueSession.run({ kpts0: k0, kpts1: k1, desc0: d0, desc1: d1 });
+  const m0 = out.matches0.data;   // BigInt64Array length featA.n; value = index into featB or -1
+  const s0 = out.mscores0.data;   // Float32Array length featA.n
+  const matches = [];
+  for (let i = 0; i < featA.n; i++) {
+    const j = Number(m0[i]);
+    if (j >= 0) matches.push({ a: i, b: j, score: s0[i] });
+  }
+  return matches;
+}
+
+// ============================================================
+// 3x3 symmetric eigendecomposition (Jacobi) + Umeyama transform
+// ============================================================
+function jacobiEigen3x3(Ain) {
+  const a = [Ain[0],Ain[1],Ain[2],Ain[3],Ain[4],Ain[5],Ain[6],Ain[7],Ain[8]];
+  const v = [1,0,0, 0,1,0, 0,0,1];
+
+  for (let iter = 0; iter < 60; iter++) {
+    const a01 = Math.abs(a[1]), a02 = Math.abs(a[2]), a12 = Math.abs(a[5]);
+    let p, q;
+    if (a01 >= a02 && a01 >= a12) { p = 0; q = 1; }
+    else if (a02 >= a12) { p = 0; q = 2; }
+    else { p = 1; q = 2; }
+    const apq = a[p*3 + q];
+    if (Math.abs(apq) < 1e-12) break;
+
+    const app = a[p*3 + p], aqq = a[q*3 + q];
+    const theta = (aqq - app) / (2 * apq);
+    let t;
+    if (Math.abs(theta) > 1e10) t = 1 / (2 * theta);
+    else {
+      const sgn = theta < 0 ? -1 : 1;
+      t = sgn / (Math.abs(theta) + Math.sqrt(theta * theta + 1));
+    }
+    const c = 1 / Math.sqrt(t * t + 1);
+    const s = t * c;
+
+    a[p*3 + p] = app - t * apq;
+    a[q*3 + q] = aqq + t * apq;
+    a[p*3 + q] = 0; a[q*3 + p] = 0;
+
+    for (let r = 0; r < 3; r++) {
+      if (r === p || r === q) continue;
+      const arp = a[r*3 + p], arq = a[r*3 + q];
+      a[r*3 + p] = c * arp - s * arq;
+      a[p*3 + r] = a[r*3 + p];
+      a[r*3 + q] = s * arp + c * arq;
+      a[q*3 + r] = a[r*3 + q];
+    }
+    for (let r = 0; r < 3; r++) {
+      const vrp = v[r*3 + p], vrq = v[r*3 + q];
+      v[r*3 + p] = c * vrp - s * vrq;
+      v[r*3 + q] = s * vrp + c * vrq;
+    }
+  }
+
+  return { values: [a[0], a[4], a[8]], vectors: v };
+}
+
+// `opts.rigid: true` forces the similarity-transform scale s=1, producing a
+// pure rigid (R, T) alignment. Use this when src and dst points are already
+// in matching metric units (e.g. metric depth + per-pair depth calibration).
+// Without it, when matched keypoints in one photo cluster in a tight 3D
+// region, Umeyama shrinks the entire src cloud to fit — producing the
+// "doll-house room inside a room" effect.
+function umeyamaTransform(srcPts, dstPts, opts = {}) {
+  const n = srcPts.length;
+  if (n < 3) return null;
+
+  let csx=0,csy=0,csz=0, cdx=0,cdy=0,cdz=0;
+  for (let i = 0; i < n; i++) {
+    csx += srcPts[i][0]; csy += srcPts[i][1]; csz += srcPts[i][2];
+    cdx += dstPts[i][0]; cdy += dstPts[i][1]; cdz += dstPts[i][2];
+  }
+  csx /= n; csy /= n; csz /= n; cdx /= n; cdy /= n; cdz /= n;
+
+  const H = new Float64Array(9);
+  let sigSrc = 0;
+  for (let i = 0; i < n; i++) {
+    const sx = srcPts[i][0]-csx, sy = srcPts[i][1]-csy, sz = srcPts[i][2]-csz;
+    const dx = dstPts[i][0]-cdx, dy = dstPts[i][1]-cdy, dz = dstPts[i][2]-cdz;
+    H[0] += dx*sx; H[1] += dx*sy; H[2] += dx*sz;
+    H[3] += dy*sx; H[4] += dy*sy; H[5] += dy*sz;
+    H[6] += dz*sx; H[7] += dz*sy; H[8] += dz*sz;
+    sigSrc += sx*sx + sy*sy + sz*sz;
+  }
+  for (let k = 0; k < 9; k++) H[k] /= n;
+  sigSrc /= n;
+  if (sigSrc < 1e-9) return null;
+
+  const HtH = new Float64Array(9);
+  for (let r = 0; r < 3; r++) {
+    for (let c = 0; c < 3; c++) {
+      let s = 0;
+      for (let k = 0; k < 3; k++) s += H[k*3 + r] * H[k*3 + c];
+      HtH[r*3 + c] = s;
+    }
+  }
+
+  const { values: ev, vectors: V } = jacobiEigen3x3(HtH);
+  const order = [0, 1, 2].sort((a, b) => ev[b] - ev[a]);
+  const S = [Math.sqrt(Math.max(0, ev[order[0]])), Math.sqrt(Math.max(0, ev[order[1]])), Math.sqrt(Math.max(0, ev[order[2]]))];
+
+  const Vs = new Float64Array(9);
+  for (let c = 0; c < 3; c++) for (let r = 0; r < 3; r++) Vs[r*3 + c] = V[r*3 + order[c]];
+
+  const U = new Float64Array(9);
+  for (let c = 0; c < 3; c++) {
+    if (S[c] < 1e-9) continue;
+    for (let r = 0; r < 3; r++) {
+      let sum = 0;
+      for (let k = 0; k < 3; k++) sum += H[r*3 + k] * Vs[k*3 + c];
+      U[r*3 + c] = sum / S[c];
+    }
+  }
+
+  const UVt = new Float64Array(9);
+  for (let r = 0; r < 3; r++) {
+    for (let c = 0; c < 3; c++) {
+      let sum = 0;
+      for (let k = 0; k < 3; k++) sum += U[r*3 + k] * Vs[c*3 + k];
+      UVt[r*3 + c] = sum;
+    }
+  }
+  const detUVt = UVt[0]*(UVt[4]*UVt[8]-UVt[5]*UVt[7])
+               - UVt[1]*(UVt[3]*UVt[8]-UVt[5]*UVt[6])
+               + UVt[2]*(UVt[3]*UVt[7]-UVt[4]*UVt[6]);
+  const d = detUVt < 0 ? -1 : 1;
+
+  const Ud = [U[0], U[1], d*U[2], U[3], U[4], d*U[5], U[6], U[7], d*U[8]];
+  const R = new Float64Array(9);
+  for (let r = 0; r < 3; r++) {
+    for (let c = 0; c < 3; c++) {
+      let sum = 0;
+      for (let k = 0; k < 3; k++) sum += Ud[r*3 + k] * Vs[c*3 + k];
+      R[r*3 + c] = sum;
+    }
+  }
+
+  let s = (S[0] + S[1] + d * S[2]) / sigSrc;
+  if (!isFinite(s) || s <= 0 || s > 100) return null;
+  if (opts.rigid) s = 1;
+
+  const tx = cdx - s * (R[0]*csx + R[1]*csy + R[2]*csz);
+  const ty = cdy - s * (R[3]*csx + R[4]*csy + R[5]*csz);
+  const tz = cdz - s * (R[6]*csx + R[7]*csy + R[8]*csz);
+
+  const M = new Float32Array(16);
+  M[0]=s*R[0]; M[1]=s*R[1]; M[2]=s*R[2];   M[3]=tx;
+  M[4]=s*R[3]; M[5]=s*R[4]; M[6]=s*R[5];   M[7]=ty;
+  M[8]=s*R[6]; M[9]=s*R[7]; M[10]=s*R[8];  M[11]=tz;
+  M[12]=0; M[13]=0; M[14]=0; M[15]=1;
+  return M;
+}
+
+async function ransacUmeyama(srcPts, dstPts, iters = 200, thresh = 0.15, opts = {}) {
+  const n = srcPts.length;
+  if (n < 4) {
+    const T = umeyamaTransform(srcPts, dstPts, opts);
+    return T ? { transform: T, count: n, inliers: srcPts.map((_, i) => i) } : null;
+  }
+  let best = { count: 0, transform: null, inliers: [] };
+  const t2 = thresh * thresh;
+  for (let it = 0; it < iters; it++) {
+    const idx = [];
+    while (idx.length < 4) {
+      const r = (Math.random() * n) | 0;
+      if (!idx.includes(r)) idx.push(r);
+    }
+    const ss = idx.map(i => srcPts[i]);
+    const sd = idx.map(i => dstPts[i]);
+    const T = umeyamaTransform(ss, sd, opts);
+    if (!T) continue;
+    const inliers = [];
+    for (let i = 0; i < n; i++) {
+      const p = applyMat4(T, srcPts[i]);
+      const dx = p[0]-dstPts[i][0], dy = p[1]-dstPts[i][1], dz = p[2]-dstPts[i][2];
+      if (dx*dx + dy*dy + dz*dz < t2) inliers.push(i);
+    }
+    if (inliers.length > best.count) {
+      best.count = inliers.length;
+      best.transform = T;
+      best.inliers = inliers;
+    }
+    if ((it & 31) === 31) await yieldUI();
+  }
+  if (best.count >= 6) {
+    const ss = best.inliers.map(i => srcPts[i]);
+    const sd = best.inliers.map(i => dstPts[i]);
+    const T = umeyamaTransform(ss, sd, opts);
+    if (T) best.transform = T;
+  }
+  return best;
+}
+
+async function fuseReconstructions(recons) {
+  recons[0].transform = identity4();
+  recons[0].fusionOK = true;
+  inputImages[0].fused = true;
+
+  await ensureMatchingModels();
+  const features = [];
+  for (let i = 0; i < recons.length; i++) {
+    setStatus(`Extracting features ${i + 1} of ${recons.length}…`, 'busy');
+    await yieldUI();
+    const r = recons[i];
+    const feat = await extractSuperPoint(r.image, r.w, r.h);
+    features.push(feat);
+    console.log(`[fuse] photo ${i + 1}: ${feat.n} SuperPoint keypoints (SP input ${feat.spw}x${feat.sph}, depth grid ${r.w}x${r.h})`);
+    await yieldUI();
+  }
+
+  for (let i = 1; i < recons.length; i++) {
+    setStatus(`Aligning photo ${i + 1}…`, 'busy');
+    await yieldUI();
+
+    // 1. Find the best fused reference photo by raw LightGlue match count.
+    let refIdx = -1, refMatches = [];
+    for (let j = i - 1; j >= 0; j--) {
+      if (!recons[j].fusionOK) continue;
+      const m = await matchLightGlue(features[j], features[i]);
+      console.log(`[fuse] photo ${i + 1} -> ${j + 1}: LightGlue matches=${m.length}`);
+      if (m.length > refMatches.length) {
+        refIdx = j;
+        refMatches = m;
+      }
+      await yieldUI();
+      if (refMatches.length > 500) break;  // already plenty, stop searching backwards
+    }
+
+    if (refMatches.length < 8) {
+      recons[i].transform = mulMat4(recons[i - 1].transform, translate4(3.0, 0, 0));
+      recons[i].fusionOK = false;
+      inputImages[i].fused = false;
+      console.log(`[fuse] photo ${i + 1}: NO FUSION (best=${refMatches.length} matches, need >=8) — placed sideways`);
+      continue;
+    }
+
+    // 2. Depth calibration. The pre-calibration positions encode each photo's
+    //    *relative* depth scaled to a fixed [0.4, 2.0]*depthScale band; fitting
+    //    z_ref = k*z_new + c at matched keypoints rescales photo i's depth to
+    //    photo j's frame, removing the cross-photo scale/offset that monocular
+    //    depth leaves behind.
+    const featRef = features[refIdx], featNew = features[i];
+    const reconRef = recons[refIdx];
+    let reconNew = recons[i];
+    const zsRef = [], zsNew = [];
+    for (const m of refMatches) {
+      const idxR = featRef.gridY[m.a] * reconRef.w + featRef.gridX[m.a];
+      const idxN = featNew.gridY[m.b] * reconNew.w + featNew.gridX[m.b];
+      // backProject stores positions[*+2] as -z, so negate to get depth.
+      const zR = -reconRef.positions[idxR * 3 + 2];
+      const zN = -reconNew.positions[idxN * 3 + 2];
+      if (zR > 0.01 && zN > 0.01) { zsRef.push(zR); zsNew.push(zN); }
+    }
+    const { k: depthK, c: depthC } = robustLinearFit(zsNew, zsRef);
+    console.log(`[fuse] photo ${i + 1}: depth calibration vs photo ${refIdx + 1}: z_ref ≈ ${depthK.toFixed(3)}·z_new + ${depthC.toFixed(3)} (from ${zsRef.length} samples)`);
+
+    // 3. Re-back-project photo i with the calibration applied.
+    const calibrated = backProject(reconNew.image, reconNew.rawDepth, reconNew.w, reconNew.h, {
+      calib: { k: depthK, c: depthC },
+      absolute: reconNew.absolute,
+    });
+    calibrated.image = reconNew.image;
+    calibrated.rawDepth = reconNew.rawDepth;
+    calibrated.absolute = reconNew.absolute;
+    recons[i] = calibrated;
+    reconNew = calibrated;
+
+    // 4. RANSAC + Umeyama on calibrated 3D positions. Umeyama's scale should
+    //    now be ~1; what's left is rigid alignment of the two depth surfaces.
+    const ptsRef = [], ptsNew = [];
+    for (const m of refMatches) {
+      const idxR = featRef.gridY[m.a] * reconRef.w + featRef.gridX[m.a];
+      const idxN = featNew.gridY[m.b] * reconNew.w + featNew.gridX[m.b];
+      ptsRef.push([reconRef.positions[idxR*3], reconRef.positions[idxR*3+1], reconRef.positions[idxR*3+2]]);
+      ptsNew.push([reconNew.positions[idxN*3], reconNew.positions[idxN*3+1], reconNew.positions[idxN*3+2]]);
+    }
+    await yieldUI();
+    // Force rigid (no Umeyama scale) when depths are metric — the per-pair
+    // depth calibration above already absorbed any cross-photo scale drift;
+    // further scaling shrinks whole photos into a "mini room inside the room"
+    // when matched keypoints cluster tightly in 3D.
+    const rigid = !!reconNew.absolute;
+    const result = await ransacUmeyama(ptsNew, ptsRef, 200, 0.15, { rigid });
+
+    if (result && result.transform && result.count >= 10) {
+      recons[i].transform = mulMat4(reconRef.transform, result.transform);
+      recons[i].fusionOK = true;
+      inputImages[i].fused = true;
+      console.log(`[fuse] photo ${i + 1}: FUSED${rigid ? ' (rigid)' : ''} to photo ${refIdx + 1} (${result.count} inliers from ${refMatches.length} matches)`);
+    } else {
+      recons[i].transform = mulMat4(recons[i - 1].transform, translate4(3.0, 0, 0));
+      recons[i].fusionOK = false;
+      inputImages[i].fused = false;
+      console.log(`[fuse] photo ${i + 1}: NO FUSION (${result?.count || 0} inliers from ${refMatches.length} matches, need >=10) — placed sideways`);
+    }
+  }
+}
+
+// Depth-scale calibration: fits ys ≈ k*xs (scale-only, no offset) via the
+// median per-sample ratio, clamped to a safe range. Free-offset OLS produced
+// extreme (k, c) when matched depths had narrow variance, sending whole point
+// clouds to negative z. Median ratio is the standard robust choice for
+// monocular-depth scale alignment and degrades gracefully to identity.
+function robustLinearFit(xs, ys) {
+  const ratios = [];
+  for (let i = 0; i < xs.length; i++) {
+    if (xs[i] > 0.05 && ys[i] > 0.05) ratios.push(ys[i] / xs[i]);
+  }
+  if (ratios.length < 4) return { k: 1, c: 0 };
+  ratios.sort((a, b) => a - b);
+  const median = ratios[ratios.length >> 1];
+  const k = Math.max(0.5, Math.min(2.0, median));
+  return { k, c: 0 };
+}
+
+// ============================================================
+// Mat4 helpers
+// ============================================================
+function identity4() { return new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]); }
+function translate4(x, y, z) { return new Float32Array([1,0,0,x, 0,1,0,y, 0,0,1,z, 0,0,0,1]); }
+function mulMat4(a, b) {
+  const o = new Float32Array(16);
+  for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) {
+    let s = 0;
+    for (let k = 0; k < 4; k++) s += a[r*4+k] * b[k*4+c];
+    o[r*4+c] = s;
+  }
+  return o;
+}
+function applyMat4(m, p) {
+  return [
+    m[0]*p[0] + m[1]*p[1] + m[2]*p[2] + m[3],
+    m[4]*p[0] + m[5]*p[1] + m[6]*p[2] + m[7],
+    m[8]*p[0] + m[9]*p[1] + m[10]*p[2] + m[11],
+  ];
+}
+function transformPositions(positions, m) {
+  const out = new Float32Array(positions.length);
+  for (let i = 0; i < positions.length; i += 3) {
+    const x = positions[i], y = positions[i+1], z = positions[i+2];
+    out[i]   = m[0]*x + m[1]*y + m[2]*z + m[3];
+    out[i+1] = m[4]*x + m[5]*y + m[6]*z + m[7];
+    out[i+2] = m[8]*x + m[9]*y + m[10]*z + m[11];
+  }
+  return out;
+}
+
+function renderReconstructions() {
+  if (lastReconstructions.length === 0) return;
+  clearScene();
+  const mode = $('view-mode').value;
+  const { positions, colors, indices } = buildMergedMesh();
+
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+  if (mode === 'mesh') {
+    geom.setIndex(new THREE.BufferAttribute(indices, 1));
+    geom.computeVertexNormals();
+    const mat = new THREE.MeshStandardMaterial({
+      vertexColors: true, side: THREE.DoubleSide, roughness: 0.95, metalness: 0
+    });
+    currentObject = new THREE.Mesh(geom, mat);
+  } else {
+    const mat = new THREE.PointsMaterial({
+      vertexColors: true, size: parseFloat($('point-size').value) * 0.005, sizeAttenuation: true
+    });
+    currentObject = new THREE.Points(geom, mat);
+  }
+  scene.add(currentObject);
+  frameObject(currentObject);
+}
+
+function frameObject(obj) {
+  obj.geometry.computeBoundingSphere();
+  const s = obj.geometry.boundingSphere;
+  if (!s) return;
+  controls.target.copy(s.center);
+  camera.position.set(s.center.x, s.center.y, s.center.z + s.radius * 1.6);
+  controls.update();
+}
+
+$('view-mode').onchange = renderReconstructions;
+$('point-size').oninput = () => {
+  if (currentObject && currentObject.material.isPointsMaterial) {
+    currentObject.material.size = parseFloat($('point-size').value) * 0.005;
+  }
+};
+
+// ---------- Merged mesh builder (used by export + RL env upload) ----------
+function buildMergedMesh() {
+  const n = lastReconstructions.length;
+  let totalV = 0, totalI = 0;
+  for (const r of lastReconstructions) { totalV += r.positions.length / 3; totalI += r.indices.length; }
+  const positions = new Float32Array(totalV * 3);
+  const colors = new Float32Array(totalV * 3);
+  const indices = new Uint32Array(totalI);
+  let vOff = 0, iOff = 0;
+  for (let k = 0; k < n; k++) {
+    const r = lastReconstructions[k];
+    const M = r.transform || identity4();
+    const transformed = transformPositions(r.positions, M);
+    positions.set(transformed, vOff * 3);
+    colors.set(r.colors, vOff * 3);
+    for (let j = 0; j < r.indices.length; j++) indices[iOff + j] = r.indices[j] + vOff;
+    vOff += r.positions.length / 3;
+    iOff += r.indices.length;
+  }
+  return { positions, colors, indices };
+}
+
+// ---------- Export ----------
+$('btn-export-ply').onclick = () => {
+  if (lastReconstructions.length === 0) return;
+  const { positions, colors, indices } = buildMergedMesh();
+  const nv = positions.length / 3, nf = indices.length / 3;
+  let s = `ply\nformat ascii 1.0\nelement vertex ${nv}\nproperty float x\nproperty float y\nproperty float z\nproperty uchar red\nproperty uchar green\nproperty uchar blue\nelement face ${nf}\nproperty list uchar int vertex_indices\nend_header\n`;
+  const lines = [];
+  for (let i = 0; i < nv; i++) {
+    lines.push(`${positions[i*3].toFixed(4)} ${positions[i*3+1].toFixed(4)} ${positions[i*3+2].toFixed(4)} ${Math.round(colors[i*3]*255)} ${Math.round(colors[i*3+1]*255)} ${Math.round(colors[i*3+2]*255)}`);
+  }
+  for (let i = 0; i < nf; i++) lines.push(`3 ${indices[i*3]} ${indices[i*3+1]} ${indices[i*3+2]}`);
+  s += lines.join('\n') + '\n';
+  download(new Blob([s], { type: 'text/plain' }), 'worldscan.ply');
+};
+
+$('btn-export-obj').onclick = () => {
+  if (lastReconstructions.length === 0) return;
+  const { positions, colors, indices } = buildMergedMesh();
+  const nv = positions.length / 3, nf = indices.length / 3;
+  const lines = [];
+  for (let i = 0; i < nv; i++) {
+    lines.push(`v ${positions[i*3].toFixed(4)} ${positions[i*3+1].toFixed(4)} ${positions[i*3+2].toFixed(4)} ${colors[i*3].toFixed(3)} ${colors[i*3+1].toFixed(3)} ${colors[i*3+2].toFixed(3)}`);
+  }
+  for (let i = 0; i < nf; i++) lines.push(`f ${indices[i*3]+1} ${indices[i*3+1]+1} ${indices[i*3+2]+1}`);
+  download(new Blob([lines.join('\n')], { type: 'text/plain' }), 'worldscan.obj');
+};
+
+// ---------- RL Env ----------
+let rlServerOnline = false;
+let rlBuildId = null;
+let rlReplayData = null;
+let rlReplayFrame = 0;
+let rlReplayAnimating = false;
+let rlReplayTimer = null;
+
+function mergedReconToOBJBlob() {
+  const { positions, indices } = buildMergedMesh();
+  const nv = positions.length / 3, nf = indices.length / 3;
+  const lines = [];
+  for (let i = 0; i < nv; i++) {
+    lines.push(`v ${positions[i*3].toFixed(4)} ${positions[i*3+1].toFixed(4)} ${positions[i*3+2].toFixed(4)}`);
+  }
+  for (let i = 0; i < nf; i++) lines.push(`f ${indices[i*3]+1} ${indices[i*3+1]+1} ${indices[i*3+2]+1}`);
+  return new Blob([lines.join('\n')], { type: 'text/plain' });
+}
+
+async function checkRlServer() {
+  const stateEl = $('rl-server-state');
+  try {
+    const res = await fetch('/api/builds', { method: 'GET' });
+    if (res.ok) {
+      rlServerOnline = true;
+      stateEl.textContent = '(online)';
+      stateEl.style.color = 'var(--accent)';
+      $('btn-rl-build').disabled = lastReconstructions.length === 0;
+      return;
+    }
+    throw new Error('non-200');
+  } catch (e) {
+    rlServerOnline = false;
+    stateEl.textContent = '(offline — run `python -m rl_env serve`)';
+    stateEl.style.color = 'var(--warn)';
+    $('btn-rl-build').disabled = true;
+    $('btn-rl-run').disabled = true;
+    $('btn-rl-benchmark').disabled = true;
+    $('btn-rl-render').disabled = true;
+  }
+}
+
+function stopReplayAnimation() {
+  rlReplayAnimating = false;
+  if (rlReplayTimer) { clearTimeout(rlReplayTimer); rlReplayTimer = null; }
+  $('rl-replay-play').textContent = 'Play';
+}
+
+function drawRlReplay() {
+  if (!rlReplayData || !rlReplayData.trace?.length) return;
+  const canvas = $('rl-replay-canvas');
+  const ctx = canvas.getContext('2d');
+  const { trace, bounds_min: bmin, bounds_max: bmax } = rlReplayData;
+  const frame = trace[Math.max(0, Math.min(rlReplayFrame, trace.length - 1))];
+  const pad = 18;
+  const width = canvas.width, height = canvas.height;
+  const minX = Array.isArray(bmin) ? bmin[0] : -3;
+  const maxX = Array.isArray(bmax) ? bmax[0] : 3;
+  const minY = Array.isArray(bmin) ? bmin[1] : -3;
+  const maxY = Array.isArray(bmax) ? bmax[1] : 3;
+  const spanX = Math.max(1e-3, maxX - minX);
+  const spanY = Math.max(1e-3, maxY - minY);
+  const scale = Math.min((width - pad * 2) / spanX, (height - pad * 2) / spanY);
+  const originX = (width - spanX * scale) * 0.5;
+  const originY = (height - spanY * scale) * 0.5;
+  const worldToCanvas = ([x, y]) => ([
+    originX + (x - minX) * scale,
+    height - (originY + (y - minY) * scale),
+  ]);
+
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = '#0e1116';
+  ctx.fillRect(0, 0, width, height);
+  ctx.strokeStyle = '#1f2937';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(originX, originY, spanX * scale, spanY * scale);
+
+  const goalPx = worldToCanvas(frame.goal_xy);
+  ctx.fillStyle = '#5eead4';
+  ctx.beginPath();
+  ctx.arc(goalPx[0], goalPx[1], 6, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = '#7aa2f7';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  for (let i = 0; i <= rlReplayFrame; i++) {
+    const p = worldToCanvas(trace[i].agent_xy);
+    if (i === 0) ctx.moveTo(p[0], p[1]);
+    else ctx.lineTo(p[0], p[1]);
+  }
+  ctx.stroke();
+
+  const agentPx = worldToCanvas(frame.agent_xy);
+  ctx.fillStyle = frame.collision ? '#f87171' : '#7aa2f7';
+  ctx.beginPath();
+  ctx.arc(agentPx[0], agentPx[1], 5, 0, Math.PI * 2);
+  ctx.fill();
+
+  $('rl-replay-metrics').textContent =
+    `step ${frame.step}/${trace.length - 1} · d=${frame.distance.toFixed(2)}${frame.collision ? ' · collision' : ''}`;
+  drawReplayDistanceChart();
+}
+
+function loadReplay(data) {
+  const replayEl = $('rl-replay');
+  if (!data || !data.trace || data.trace.length === 0) {
+    replayEl.style.display = 'none';
+    stopReplayAnimation();
+    rlReplayData = null;
+    return;
+  }
+  rlReplayData = data;
+  rlReplayFrame = 0;
+  replayEl.style.display = 'block';
+  $('rl-replay-title').textContent = `Replay · ${data.policy} · ep ${data.episode + 1} · ${data.success ? 'success' : 'fail'}`;
+  $('rl-replay-slider').max = String(data.trace.length - 1);
+  $('rl-replay-slider').value = '0';
+  drawRlReplay();
+}
+
+function drawReplayDistanceChart() {
+  if (!rlReplayData || !rlReplayData.trace?.length) return;
+  const canvas = $('rl-replay-chart');
+  const ctx = canvas.getContext('2d');
+  const width = canvas.width, height = canvas.height;
+  const trace = rlReplayData.trace;
+  const pad = { l: 34, r: 12, t: 12, b: 20 };
+  const chartW = width - pad.l - pad.r;
+  const chartH = height - pad.t - pad.b;
+  const maxDist = Math.max(0.01, ...trace.map((t) => t.distance));
+  const xFor = (i) => pad.l + (i / Math.max(1, trace.length - 1)) * chartW;
+  const yFor = (d) => pad.t + (1 - d / maxDist) * chartH;
+
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = '#0e1116';
+  ctx.fillRect(0, 0, width, height);
+  ctx.strokeStyle = '#1f2937';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(pad.l, pad.t, chartW, chartH);
+
+  ctx.strokeStyle = '#5eead4';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  for (let i = 0; i < trace.length; i++) {
+    const x = xFor(i), y = yFor(trace[i].distance);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+
+  const cx = xFor(rlReplayFrame);
+  const cy = yFor(trace[rlReplayFrame].distance);
+  ctx.fillStyle = '#7aa2f7';
+  ctx.beginPath();
+  ctx.arc(cx, cy, 3.5, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = '#8b949e';
+  ctx.font = '10px ui-monospace, SFMono-Regular, Menlo, monospace';
+  ctx.fillText('distance', 6, 14);
+  ctx.fillText(`0`, pad.l - 8, height - 6);
+  ctx.fillText(`${maxDist.toFixed(1)}m`, 4, pad.t + 4);
+}
+
+$('btn-rl-build').onclick = async () => {
+  if (lastReconstructions.length === 0 || !rlServerOnline) return;
+  const btn = $('btn-rl-build');
+  const resultEl = $('rl-build-result');
+  const progress = $('rl-build-progress');
+  const bar = $('rl-build-progress-bar');
+  btn.disabled = true;
+  resultEl.textContent = '';
+  progress.classList.add('show');
+  bar.style.width = '20%';
+  setStatus('Building RL env…', 'busy');
+
+  try {
+    const blob = mergedReconToOBJBlob();
+    const fd = new FormData();
+    fd.append('mesh', blob, 'reconstruction.obj');
+    fd.append('up', $('rl-up').value);
+    fd.append('diag', $('rl-diag').value);
+    bar.style.width = '60%';
+    const res = await fetch('/api/build', { method: 'POST', body: fd });
+    bar.style.width = '95%';
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    rlBuildId = data.build_id;
+    resultEl.innerHTML = `
+      <div>build_id: <code>${data.build_id}</code></div>
+      <div>hulls: ${data.n_hulls} · floor_z: ${data.floor_z.toFixed(2)}</div>
+      <div>bounds: [${data.bounds_min.map(v=>v.toFixed(1)).join(', ')}] → [${data.bounds_max.map(v=>v.toFixed(1)).join(', ')}]</div>
+      <div>spawn: [${data.spawn_region.map(v=>v.toFixed(1)).join(', ')}] · ${data.elapsed_s}s</div>
+    `;
+    bar.style.width = '100%';
+    setStatus('RL env built.', 'ok');
+    $('btn-rl-run').disabled = false;
+    $('btn-rl-benchmark').disabled = false;
+    $('btn-rl-train').disabled = false;
+    $('btn-rl-render').disabled = false;
+    rlPpoTrained = false;
+    $('rl-train-result').textContent = '';
+    $('rl-benchmark-result').textContent = '';
+    loadReplay(null);
+  } catch (e) {
+    console.error(e);
+    resultEl.innerHTML = `<span style="color:var(--err);">build failed: ${e.message}</span>`;
+    setStatus(`Build failed: ${e.message}`, 'err');
+  } finally {
+    btn.disabled = lastReconstructions.length === 0;
+    setTimeout(() => progress.classList.remove('show'), 600);
+  }
+};
+
+let rlPpoTrained = false;
+
+$('btn-rl-train').onclick = async () => {
+  if (!rlBuildId || !rlServerOnline) return;
+  const btn = $('btn-rl-train');
+  const resultEl = $('rl-train-result');
+  const steps = parseInt($('rl-train-steps').value, 10);
+  btn.disabled = true;
+  resultEl.innerHTML = `<div>training PPO for ${steps.toLocaleString()} steps… (~${Math.max(5, Math.round(steps / 6000))}s on CPU)</div>`;
+  setStatus('Training PPO…', 'busy');
+
+  try {
+    const t0 = performance.now();
+    const res = await fetch('/api/train', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        build_id: rlBuildId,
+        steps,
+        n_envs: 4,
+        max_steps: 300,
+        seed: 0,
+        device: 'cpu',
+        min_start_goal_dist: 0.8,
+        max_start_goal_dist: 0,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    const wall = ((performance.now() - t0) / 1000).toFixed(1);
+    rlPpoTrained = true;
+    resultEl.innerHTML = `
+      <div style="color:var(--text); font-weight:600;">trained ${data.steps.toLocaleString()} steps</div>
+      <div>${data.elapsed_s}s · ${data.fps.toLocaleString()} steps/s · wall ${wall}s</div>
+      <div>switch Policy → <code>ppo</code> to evaluate</div>
+    `;
+    $('rl-policy').value = 'ppo';
+    setStatus('PPO trained.', 'ok');
+  } catch (e) {
+    console.error(e);
+    resultEl.innerHTML = `<span style="color:var(--err);">train failed: ${e.message}</span>`;
+    setStatus(`Train failed: ${e.message}`, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+};
+
+function summarizeRollout(episodes, policyName) {
+  const n = Math.max(episodes.length, 1);
+  const successes = episodes.filter((e) => e.success).length;
+  const avgReward = episodes.reduce((s, e) => s + e.reward, 0) / n;
+  const avgDistance = episodes.reduce((s, e) => s + e.distance, 0) / n;
+  const avgSteps = episodes.reduce((s, e) => s + e.steps, 0) / n;
+  return { policy: policyName, successRate: `${successes}/${episodes.length}`, avgReward, avgDistance, avgSteps };
+}
+
+$('btn-rl-run').onclick = async () => {
+  if (!rlBuildId || !rlServerOnline) return;
+  const btn = $('btn-rl-run');
+  const resultEl = $('rl-run-result');
+  btn.disabled = true;
+  resultEl.innerHTML = '<div>running…</div>';
+  setStatus('Running rollout…', 'busy');
+
+  try {
+    const payload = {
+      build_id: rlBuildId,
+      policy: $('rl-policy').value,
+      episodes: parseInt($('rl-episodes').value, 10),
+      steps: parseInt($('rl-steps').value, 10),
+      seed: 0,
+      include_trace: true,
+      trace_episode: 0,
+    };
+    const res = await fetch('/api/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+
+    const rows = data.episodes.map((e, i) =>
+      `<div>ep ${i+1}: ${e.steps} steps · r=${e.reward.toFixed(1)} · d=${e.distance.toFixed(2)} · ${e.success ? '<span style="color:var(--accent);">✓</span>' : '<span style="color:var(--err);">✗</span>'}</div>`
+    ).join('');
+    resultEl.innerHTML = `
+      <div style="color:var(--text); font-weight:600; margin-bottom:4px;">
+        ${data.policy}: ${data.successes}/${data.n_episodes} success · avg r=${data.avg_reward.toFixed(1)} · ${data.elapsed_s}s
+      </div>
+      ${rows}
+    `;
+    loadReplay(data.replay);
+    setStatus(`Rollout done: ${data.successes}/${data.n_episodes} success.`, 'ok');
+  } catch (e) {
+    console.error(e);
+    resultEl.innerHTML = `<span style="color:var(--err);">run failed: ${e.message}</span>`;
+    loadReplay(null);
+    setStatus(`Run failed: ${e.message}`, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+};
+
+$('btn-rl-benchmark').onclick = async () => {
+  if (!rlBuildId || !rlServerOnline) return;
+  const btn = $('btn-rl-benchmark');
+  const resultEl = $('rl-benchmark-result');
+  const episodes = parseInt($('rl-episodes').value, 10);
+  const steps = parseInt($('rl-steps').value, 10);
+  btn.disabled = true;
+  resultEl.innerHTML = '<div>benchmark running…</div>';
+  setStatus('Benchmarking policies…', 'busy');
+
+  const runPolicy = async (policy) => {
+    const res = await fetch('/api/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ build_id: rlBuildId, policy, episodes, steps, seed: 0, include_trace: false }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `${policy}: HTTP ${res.status}`);
+    return data;
+  };
+
+  try {
+    const outputs = [];
+    outputs.push(await runPolicy('random'));
+    outputs.push(await runPolicy('greedy'));
+    try {
+      outputs.push(await runPolicy('ppo'));
+    } catch (e) {
+      outputs.push({ policy: 'ppo', skipped: true, reason: e.message, episodes: [] });
+    }
+
+    const rows = outputs.map((o) => {
+      if (o.skipped) {
+        return `<tr><td>${o.policy}</td><td colspan="4" style="color:var(--warn);">skipped (${o.reason})</td></tr>`;
+      }
+      const s = summarizeRollout(o.episodes, o.policy);
+      return `<tr>
+        <td>${s.policy}</td>
+        <td>${s.successRate}</td>
+        <td>${s.avgReward.toFixed(2)}</td>
+        <td>${s.avgDistance.toFixed(2)}</td>
+        <td>${s.avgSteps.toFixed(1)}</td>
+      </tr>`;
+    }).join('');
+
+    resultEl.innerHTML = `
+      <div style="color:var(--text); font-weight:600; margin-bottom:6px;">Benchmark (${episodes} eps, ${steps} max steps)</div>
+      <table style="width:100%; border-collapse:collapse; font-size:11px;">
+        <thead>
+          <tr style="color:var(--muted); text-align:left; border-bottom:1px solid var(--border);">
+            <th style="padding:4px 2px;">policy</th>
+            <th style="padding:4px 2px;">success</th>
+            <th style="padding:4px 2px;">avg r</th>
+            <th style="padding:4px 2px;">avg d</th>
+            <th style="padding:4px 2px;">avg steps</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    `;
+    setStatus('Benchmark complete.', 'ok');
+  } catch (e) {
+    console.error(e);
+    resultEl.innerHTML = `<span style="color:var(--err);">benchmark failed: ${e.message}</span>`;
+    setStatus(`Benchmark failed: ${e.message}`, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+};
+
+$('rl-replay-slider').oninput = () => {
+  if (!rlReplayData) return;
+  rlReplayFrame = parseInt($('rl-replay-slider').value, 10);
+  drawRlReplay();
+};
+
+$('rl-replay-play').onclick = () => {
+  if (!rlReplayData) return;
+  if (rlReplayAnimating) { stopReplayAnimation(); return; }
+  rlReplayAnimating = true;
+  $('rl-replay-play').textContent = 'Pause';
+  const tick = () => {
+    if (!rlReplayAnimating || !rlReplayData) return;
+    const maxFrame = rlReplayData.trace.length - 1;
+    rlReplayFrame = Math.min(rlReplayFrame + 1, maxFrame);
+    $('rl-replay-slider').value = String(rlReplayFrame);
+    drawRlReplay();
+    if (rlReplayFrame >= maxFrame) { stopReplayAnimation(); return; }
+    rlReplayTimer = setTimeout(tick, 45);
+  };
+  tick();
+};
+
+// ---------- Render preview ----------
+let rlRenderFrames = [];
+let rlRenderFrame = 0;
+let rlRenderAnimating = false;
+let rlRenderTimer = null;
+
+function stopRenderAnimation() {
+  rlRenderAnimating = false;
+  if (rlRenderTimer) { clearTimeout(rlRenderTimer); rlRenderTimer = null; }
+  $('rl-render-play').textContent = 'Play';
+}
+
+function drawRenderFrame(idx) {
+  const canvas = $('rl-render-canvas');
+  const ctx = canvas.getContext('2d');
+  const img = new Image();
+  img.onload = () => ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  img.src = rlRenderFrames[idx];
+  $('rl-render-metrics').textContent = `frame ${idx + 1} / ${rlRenderFrames.length}`;
+  $('rl-render-slider').value = String(idx);
+}
+
+$('btn-rl-render').onclick = async () => {
+  if (!rlBuildId || !rlServerOnline) return;
+  const btn = $('btn-rl-render');
+  btn.disabled = true;
+  btn.textContent = 'Capturing…';
+  stopRenderAnimation();
+  setStatus('Capturing render…', 'busy');
+
+  try {
+    const res = await fetch('/api/frames', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        build_id: rlBuildId,
+        policy: $('rl-policy').value,
+        steps: parseInt($('rl-steps').value, 10),
+        seed: 0,
+        max_frames: 40,
+        width: 320,
+        height: 240,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+
+    rlRenderFrames = data.frames;
+    rlRenderFrame = 0;
+    $('rl-render-box').style.display = 'block';
+    $('rl-render-title').textContent = `Render · ${data.policy} · ${data.success ? 'success' : 'fail'}`;
+    $('rl-render-slider').max = String(rlRenderFrames.length - 1);
+    drawRenderFrame(0);
+    setStatus(`Render captured: ${data.n_frames} frames, ${data.steps} steps.`, 'ok');
+  } catch (e) {
+    console.error(e);
+    setStatus(`Render failed: ${e.message}`, 'err');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Capture render';
+  }
+};
+
+$('rl-render-slider').oninput = () => {
+  if (!rlRenderFrames.length) return;
+  rlRenderFrame = parseInt($('rl-render-slider').value, 10);
+  drawRenderFrame(rlRenderFrame);
+};
+
+$('rl-render-play').onclick = () => {
+  if (!rlRenderFrames.length) return;
+  if (rlRenderAnimating) { stopRenderAnimation(); return; }
+  rlRenderAnimating = true;
+  $('rl-render-play').textContent = 'Pause';
+  const tick = () => {
+    if (!rlRenderAnimating) return;
+    rlRenderFrame = (rlRenderFrame + 1) % rlRenderFrames.length;
+    drawRenderFrame(rlRenderFrame);
+    if (rlRenderFrame === rlRenderFrames.length - 1) { stopRenderAnimation(); return; }
+    rlRenderTimer = setTimeout(tick, 80);
+  };
+  tick();
+};
+
+checkRlServer();
+
+function download(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// ---------- Splat viewer ----------
+let splatObject = null;
+let splatScale = 1;
+
+$('splat-scene').onchange = () => {
+  const v = $('splat-scene').value;
+  $('splat-url').style.display = v === 'custom' ? 'block' : 'none';
+  $('drop-splat').style.display = v === 'custom' ? 'block' : 'none';
+};
+const dropSplat = $('drop-splat');
+const fileSplat = $('file-splat');
+let customSplatBuffer = null;
+dropSplat.onclick = () => fileSplat.click();
+['dragenter', 'dragover'].forEach(e => dropSplat.addEventListener(e, ev => { ev.preventDefault(); dropSplat.classList.add('drag'); }));
+['dragleave', 'drop'].forEach(e => dropSplat.addEventListener(e, ev => { ev.preventDefault(); dropSplat.classList.remove('drag'); }));
+dropSplat.addEventListener('drop', async ev => {
+  if (ev.dataTransfer.files[0]) {
+    customSplatBuffer = await ev.dataTransfer.files[0].arrayBuffer();
+    setStatus(`File ready: ${ev.dataTransfer.files[0].name}`, 'ok');
+  }
+});
+fileSplat.onchange = async () => {
+  if (fileSplat.files[0]) {
+    customSplatBuffer = await fileSplat.files[0].arrayBuffer();
+    setStatus(`File ready: ${fileSplat.files[0].name}`, 'ok');
+  }
+};
+
+$('btn-load-splat').onclick = async () => {
+  try {
+    setStatus('Loading…', 'busy');
+    $('splat-progress').classList.add('show');
+    const bar = $('splat-progress-bar');
+    bar.style.width = '0%';
+
+    let buffer;
+    const sel = $('splat-scene').value;
+    if (sel === 'custom') {
+      const url = $('splat-url').value.trim();
+      if (url) buffer = await fetchWithProgress(url, (p) => bar.style.width = `${p}%`);
+      else if (customSplatBuffer) buffer = customSplatBuffer;
+      else throw new Error('Provide a URL or drop a file.');
+    } else {
+      buffer = await fetchWithProgress(sel, (p) => bar.style.width = `${p}%`);
+    }
+
+    await yieldUI();
+    const splats = parseSplat(new Uint8Array(buffer));
+    showSplatAsPoints(splats);
+    $('splat-progress').classList.remove('show');
+    setStatus(`Loaded ${splats.count.toLocaleString()} points.`, 'ok');
+  } catch (e) {
+    console.error(e);
+    setStatus(`Load failed: ${e.message}`, 'err');
+    $('splat-progress').classList.remove('show');
+  }
+};
+
+$('splat-scale').oninput = () => {
+  splatScale = parseFloat($('splat-scale').value);
+  if (splatObject) splatObject.scale.setScalar(splatScale);
+};
+
+async function fetchWithProgress(url, onProgress) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const total = parseInt(res.headers.get('content-length') || '0', 10);
+  const reader = res.body.getReader();
+  const chunks = [];
+  let received = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    received += value.length;
+    if (total) onProgress(Math.min(99, Math.round(received / total * 100)));
+  }
+  onProgress(100);
+  const buf = new Uint8Array(received);
+  let offset = 0;
+  for (const c of chunks) { buf.set(c, offset); offset += c.length; }
+  return buf.buffer;
+}
+
+function parseSplat(bytes) {
+  const stride = 32;
+  if (bytes.length % stride !== 0) {
+    const head = String.fromCharCode(...bytes.slice(0, 3));
+    if (head === 'ply') return parsePlyAsPoints(bytes);
+    throw new Error('Unexpected file size.');
+  }
+  const count = bytes.length / stride;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const positions = new Float32Array(count * 3);
+  const colors = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    const off = i * stride;
+    positions[i*3]   = view.getFloat32(off, true);
+    positions[i*3+1] = view.getFloat32(off + 4, true);
+    positions[i*3+2] = view.getFloat32(off + 8, true);
+    colors[i*3]   = bytes[off + 24] / 255;
+    colors[i*3+1] = bytes[off + 25] / 255;
+    colors[i*3+2] = bytes[off + 26] / 255;
+  }
+  for (let i = 0; i < count; i++) {
+    positions[i*3+1] = -positions[i*3+1];
+    positions[i*3+2] = -positions[i*3+2];
+  }
+  return { count, positions, colors };
+}
+
+function parsePlyAsPoints(bytes) {
+  const headerEnd = findHeaderEnd(bytes);
+  const headerStr = new TextDecoder().decode(bytes.slice(0, headerEnd));
+  const lines = headerStr.split('\n');
+  let count = 0, isBinary = false, littleEndian = true;
+  const props = [];
+  for (const line of lines) {
+    if (line.startsWith('format ')) {
+      isBinary = line.includes('binary');
+      littleEndian = line.includes('little');
+    } else if (line.startsWith('element vertex ')) {
+      count = parseInt(line.split(' ')[2], 10);
+    } else if (line.startsWith('property ') && count > 0) {
+      const parts = line.split(' ');
+      props.push({ type: parts[1], name: parts[2] });
+    } else if (line.startsWith('element ') && count > 0) break;
+  }
+  if (!isBinary) throw new Error('Only binary PLY supported.');
+  const sizeMap = { float: 4, double: 8, uchar: 1, char: 1, ushort: 2, short: 2, uint: 4, int: 4 };
+  const stride = props.reduce((a, p) => a + (sizeMap[p.type] || 0), 0);
+  const view = new DataView(bytes.buffer, bytes.byteOffset + headerEnd, count * stride);
+  const positions = new Float32Array(count * 3);
+  const colors = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    let off = i * stride;
+    let x = 0, y = 0, z = 0, r = 1, g = 1, b = 1;
+    for (const p of props) {
+      const sz = sizeMap[p.type];
+      let val = 0;
+      if (p.type === 'float') val = view.getFloat32(off, littleEndian);
+      else if (p.type === 'double') val = view.getFloat64(off, littleEndian);
+      else if (p.type === 'uchar') val = view.getUint8(off);
+      if (p.name === 'x') x = val;
+      else if (p.name === 'y') y = val;
+      else if (p.name === 'z') z = val;
+      else if (p.name === 'red') r = val / 255;
+      else if (p.name === 'green') g = val / 255;
+      else if (p.name === 'blue') b = val / 255;
+      off += sz;
+    }
+    positions[i*3] = x; positions[i*3+1] = -y; positions[i*3+2] = -z;
+    colors[i*3] = r; colors[i*3+1] = g; colors[i*3+2] = b;
+  }
+  return { count, positions, colors };
+}
+
+function findHeaderEnd(bytes) {
+  const target = 'end_header\n';
+  for (let i = 0; i < bytes.length - target.length; i++) {
+    let ok = true;
+    for (let k = 0; k < target.length; k++) {
+      if (bytes[i + k] !== target.charCodeAt(k)) { ok = false; break; }
+    }
+    if (ok) return i + target.length;
+  }
+  throw new Error('Header not found.');
+}
+
+function showSplatAsPoints({ count, positions, colors }) {
+  clearScene();
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  const mat = new THREE.PointsMaterial({
+    vertexColors: true, size: 0.012, sizeAttenuation: true, transparent: true, opacity: 0.95
+  });
+  splatObject = new THREE.Points(geom, mat);
+  currentObject = splatObject;
+  splatObject.scale.setScalar(splatScale);
+  scene.add(splatObject);
+  frameObject(splatObject);
+}
+
+setStatus('Ready.');
+</script>
+</body>
+</html>
