@@ -18,7 +18,20 @@ services:
 
   inngest-dev:
     image: inngest/inngest:latest
-    command: ["inngest", "dev", "-u", "http://api:8000/api/inngest", "--no-discovery"]
+    # `host.docker.internal` lets the dev server reach a backend running on
+    # the host (during yarn dev / uv run uvicorn ...). Inside the compose
+    # network, the `api` container resolves to itself, which is preferable
+    # for production-shaped runs — uncomment the second URL there.
+    command:
+      - inngest
+      - dev
+      - -u
+      - http://host.docker.internal:8000/api/inngest
+      # - -u
+      # - http://api:8000/api/inngest
+      - --no-discovery
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "8289:8288"   # 8288 is taken by Haleum's inngest on this host
 

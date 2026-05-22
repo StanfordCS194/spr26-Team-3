@@ -32,6 +32,7 @@ def get_backend(name: str) -> ReconstructionBackend:
 # Import side-effect: registers all known backends.
 from src.features.reconstruction.backends import (  # noqa: E402, F401
     colmap,
+    demo_fixture,
     depth_fusion,
     splat,
     vggt,
