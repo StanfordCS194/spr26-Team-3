@@ -33,6 +33,11 @@ dependencies = [
     "torch>=2.2",
     "scipy>=1.11",
 
+    # depth_fusion backend (worldscan-v2.3-depth-fusion)
+    "transformers>=4.40",
+    "torchvision>=0.17",
+    "onnxruntime>=1.20",
+
     # observability
     "sentry-sdk[fastapi]>=2.18",
 
