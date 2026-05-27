@@ -4,45 +4,61 @@ import { useState } from "react";
 
 import { StatusDot } from "@/components/StatusDot";
 import { StepNav } from "@/components/StepNav";
-import { useProjectState, useReplay, type ReplayResponse } from "@/lib/api";
+import { TrajectoryViewer, type TrajectoryRun } from "@/components/TrajectoryViewer";
+import {
+  useProjectState,
+  useReplayWithTrajectories,
+  type TrajectoryReplayResponse,
+} from "@/lib/api";
 
 export const Route = createFileRoute("/p/$projectId/replay")({
   component: ReplayScreen,
 });
 
+type PolicyName = "random" | "greedy" | "ppo";
+
+const FAILURE_LABEL: Record<string, string> = {
+  success: "success",
+  timeout: "timeout",
+  stuck: "stuck",
+  collided: "collided",
+  "near-miss": "near-miss",
+};
+
 function ReplayScreen() {
   const { projectId } = Route.useParams();
   const navigate = useNavigate();
   const { data: state } = useProjectState(projectId);
-  const replay = useReplay(projectId);
-  const [results, setResults] = useState<ReplayResponse[]>([]);
+  const replay = useReplayWithTrajectories(projectId);
+  const [runs, setRuns] = useState<Record<PolicyName, TrajectoryReplayResponse | null>>({
+    random: null,
+    greedy: null,
+    ppo: null,
+  });
+  const [focus, setFocus] = useState<PolicyName>("greedy");
+  const [episodeIdx, setEpisodeIdx] = useState<number | undefined>(undefined);
 
   const canReplay = state?.replay.complete ?? false;
+  const canPPO = state?.train.complete ?? false;
 
-  const run = async (policy: "random" | "greedy") => {
+  const run = async (policy: PolicyName) => {
+    setFocus(policy);
     const r = await replay.mutateAsync({ policy, episodes: 5, max_steps: 300, seed: 0 });
-    setResults((prev) => [r, ...prev].slice(0, 6));
+    setRuns((prev) => ({ ...prev, [policy]: r }));
   };
 
-  return (
-    <>
-      <StepNav projectId={projectId} current="replay" />
-      <div className="flex-1 p-10 overflow-auto">
-        <header className="mb-8">
-          <h1 className="text-2xl">Replay</h1>
-          <p className="text-sm text-muted-foreground mt-1.5">
-            Run random / greedy baselines against the latest build. PPO baseline lands in PR-C.
-          </p>
-        </header>
-
-        {!canReplay ? (
+  if (!canReplay) {
+    return (
+      <>
+        <StepNav projectId={projectId} current="replay" />
+        <div className="flex-1 p-10 overflow-auto">
           <section className="max-w-lg border border-border rounded-sm p-6">
             <div className="flex items-start gap-3">
               <Lock size={16} className="text-muted-foreground mt-0.5" />
               <div>
                 <p className="text-sm">Replay is locked.</p>
                 <p className="text-xs text-muted-foreground mt-1">
-                  {state?.replay.reason ?? "No build yet for this project."}
+                  {state?.replay.reason ?? "No build yet."}
                 </p>
                 <button
                   onClick={() => navigate({ to: "/p/$projectId/build", params: { projectId } })}
@@ -53,76 +69,149 @@ function ReplayScreen() {
               </div>
             </div>
           </section>
-        ) : (
-          <>
-            <div className="flex gap-2">
-              <button
-                disabled={replay.isPending}
-                onClick={() => run("random")}
-                className="px-3 py-1.5 rounded-sm border border-border text-sm hover:bg-accent disabled:opacity-50"
-              >
-                Run random (5 eps)
-              </button>
-              <button
-                disabled={replay.isPending}
-                onClick={() => run("greedy")}
-                className="px-3 py-1.5 rounded-sm bg-primary text-primary-foreground text-sm hover:opacity-90 disabled:opacity-50"
-              >
-                Run greedy (5 eps)
-              </button>
+        </div>
+      </>
+    );
+  }
+
+  const focused = runs[focus];
+
+  // failure-class buckets for the focused run
+  const buckets = focused
+    ? focused.episodes.reduce<Record<string, number[]>>((acc, ep, i) => {
+        const k = ep.failure_class;
+        (acc[k] ||= []).push(i);
+        return acc;
+      }, {})
+    : {};
+
+  const trajRun: TrajectoryRun | null = focused
+    ? {
+        policy: focused.policy,
+        bounds: focused.bounds,
+        spawn_region: focused.spawn_region,
+        episodes: focused.episodes,
+      }
+    : null;
+
+  return (
+    <>
+      <StepNav projectId={projectId} current="replay" />
+      <div className="flex-1 p-10 overflow-auto">
+        <header className="mb-8">
+          <h1 className="text-2xl">Replay</h1>
+          <p className="text-sm text-muted-foreground mt-1.5 max-w-2xl">
+            Roll the latest build under random / greedy / PPO. Trajectories
+            overlay on the floor view; failures are bucketed by reason.
+          </p>
+        </header>
+
+        <div className="flex gap-2 mb-6">
+          {(["random", "greedy", "ppo"] as PolicyName[]).map((p) => (
+            <button
+              key={p}
+              disabled={replay.isPending || (p === "ppo" && !canPPO)}
+              onClick={() => run(p)}
+              title={p === "ppo" && !canPPO ? "Train a PPO policy first" : undefined}
+              className={
+                "px-3 py-1.5 rounded-sm text-sm transition-colors " +
+                (focus === p
+                  ? "bg-primary text-primary-foreground"
+                  : "border border-border hover:bg-accent") +
+                (p === "ppo" && !canPPO ? " opacity-40 cursor-not-allowed" : "")
+              }
+            >
+              Run {p} (5 eps)
+            </button>
+          ))}
+        </div>
+
+        {replay.error && (
+          <p className="mt-2 mb-4 text-sm text-[var(--status-fail)] mono">
+            {String((replay.error as Error).message)}
+          </p>
+        )}
+
+        {focused && trajRun && (
+          <section className="space-y-6">
+            <header className="flex items-center justify-between">
+              <span className="mono text-[11px] uppercase tracking-wider text-muted-foreground">
+                {focus} · seed 0
+              </span>
+              <div className="flex items-center gap-6">
+                <StatusDot
+                  status={focused.successes / focused.n_episodes >= 0.5 ? "ok" : "warn"}
+                  label={`${focused.successes}/${focused.n_episodes}`}
+                />
+                <span className="mono text-xs text-muted-foreground">
+                  avg r = {focused.avg_reward.toFixed(2)}
+                </span>
+              </div>
+            </header>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              <div className="lg:col-span-2">
+                <TrajectoryViewer run={trajRun} episodeIndex={episodeIdx} />
+              </div>
+
+              <div className="space-y-3">
+                <h2 className="mono text-[11px] uppercase tracking-wider text-muted-foreground">
+                  episodes
+                </h2>
+                <div className="border border-border rounded-sm divide-y divide-border max-h-[360px] overflow-auto">
+                  {focused.episodes.map((ep, i) => {
+                    const active = episodeIdx === i;
+                    return (
+                      <button
+                        key={i}
+                        onClick={() => setEpisodeIdx(active ? undefined : i)}
+                        className={
+                          "block w-full text-left px-3 py-2 text-xs transition-colors " +
+                          (active ? "bg-accent" : "hover:bg-accent/30")
+                        }
+                      >
+                        <div className="flex items-center justify-between mono">
+                          <span>ep {i + 1}</span>
+                          <StatusDot status={ep.success ? "ok" : "fail"} />
+                        </div>
+                        <div className="flex items-center justify-between mono text-muted-foreground mt-0.5">
+                          <span>{ep.steps}s</span>
+                          <span>r={ep.reward.toFixed(1)}</span>
+                          <span>d={ep.distance.toFixed(2)}</span>
+                          <span>{FAILURE_LABEL[ep.failure_class] ?? ep.failure_class}</span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
 
-            {replay.error && (
-              <p className="mt-4 text-sm text-[var(--status-fail)] mono">
-                {String((replay.error as Error).message)}
-              </p>
-            )}
-
-            <div className="mt-8 space-y-4">
-              {results.map((r, i) => (
-                <section key={i} className="border border-border rounded-sm">
-                  <header className="px-4 py-2.5 border-b border-border flex items-center justify-between">
-                    <span className="mono text-[11px] uppercase tracking-wider text-muted-foreground">
-                      {r.policy}
-                    </span>
-                    <div className="flex items-center gap-4">
-                      <StatusDot
-                        status={r.successes / r.n_episodes >= 0.5 ? "ok" : "warn"}
-                        label={`${r.successes}/${r.n_episodes}`}
-                      />
-                      <span className="mono text-xs text-muted-foreground">
-                        avg r = {r.avg_reward.toFixed(2)}
-                      </span>
-                    </div>
-                  </header>
-                  <table className="w-full text-xs mono">
-                    <thead className="text-muted-foreground border-b border-border/40">
-                      <tr>
-                        <th className="text-left px-4 py-1.5">ep</th>
-                        <th className="text-left px-4 py-1.5">steps</th>
-                        <th className="text-left px-4 py-1.5">reward</th>
-                        <th className="text-left px-4 py-1.5">dist</th>
-                        <th className="text-left px-4 py-1.5">result</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {r.episodes.map((e, j) => (
-                        <tr key={j} className="border-b border-border/20 last:border-0">
-                          <td className="px-4 py-1.5">{j + 1}</td>
-                          <td className="px-4 py-1.5">{e.steps}</td>
-                          <td className="px-4 py-1.5">{e.reward.toFixed(2)}</td>
-                          <td className="px-4 py-1.5">{e.distance.toFixed(2)}</td>
-                          <td className="px-4 py-1.5">
-                            <StatusDot status={e.success ? "ok" : "fail"} />
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </section>
-              ))}
-            </div>
-          </>
+            <section>
+              <h2 className="mono text-[11px] uppercase tracking-wider text-muted-foreground mb-2">
+                failure buckets
+              </h2>
+              <div className="flex gap-2 flex-wrap">
+                {Object.entries(buckets).map(([cls, idxs]) => (
+                  <button
+                    key={cls}
+                    onClick={() => setEpisodeIdx(idxs[0])}
+                    className="px-3 py-1.5 border border-border rounded-sm text-xs mono hover:bg-accent"
+                  >
+                    {cls} · {idxs.length}
+                  </button>
+                ))}
+                {episodeIdx !== undefined && (
+                  <button
+                    onClick={() => setEpisodeIdx(undefined)}
+                    className="px-3 py-1.5 border border-border rounded-sm text-xs mono text-muted-foreground hover:bg-accent"
+                  >
+                    show all
+                  </button>
+                )}
+              </div>
+            </section>
+          </section>
         )}
       </div>
     </>
