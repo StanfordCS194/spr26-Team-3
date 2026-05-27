@@ -1,12 +1,13 @@
-"""Training routes: kick off PPO + poll progress."""
+"""Training routes — emits Inngest event, function does the work."""
 from __future__ import annotations
 
+import inngest
 from fastapi import APIRouter, HTTPException
 from nanoid import generate as nanoid
 from sqlalchemy import select
 
 from src.deps import DbSession, ProjectDep
-from src.features.training.service import start_training
+from src.inngest_client import inngest_client
 from src.models import Build, Policy
 from src.schemas import PolicyOut, TrainRequest
 
@@ -14,7 +15,7 @@ router = APIRouter()
 
 
 @router.post("/{project_id}/train", response_model=PolicyOut)
-def queue_training(
+async def queue_training(
     project: ProjectDep,
     body: TrainRequest,
     db: DbSession,
@@ -29,22 +30,30 @@ def queue_training(
         id=nanoid(size=12),
         build_id=build.id,
         algo="ppo",
-        ckpt_path="",  # set when training completes
+        ckpt_path="",
         total_steps=body.total_steps,
-        metrics={"progress": 0.0, "steps": 0},
+        metrics={"progress": 0.0, "steps": 0, "queued": True},
     )
     db.add(policy)
     db.commit()
     db.refresh(policy)
 
-    start_training(
-        policy.id,
-        build.mjcf_path,
-        total_steps=body.total_steps,
-        n_envs=body.n_envs,
-        max_steps=300,
-        seed=body.seed,
+    await inngest_client.send(
+        events=[
+            inngest.Event(
+                name="training/requested",
+                data={
+                    "policy_id": policy.id,
+                    "mjcf_path": build.mjcf_path,
+                    "total_steps": body.total_steps,
+                    "n_envs": body.n_envs,
+                    "max_steps": 300,
+                    "seed": body.seed,
+                },
+            )
+        ]
     )
+
     return policy
 
 

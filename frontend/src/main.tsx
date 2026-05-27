@@ -1,4 +1,5 @@
-import "./instrument";
+// instrument.ts disabled while we bisect the black-screen bug.
+// import "./instrument";
 import "./index.css";
 
 import { StrictMode } from "react";

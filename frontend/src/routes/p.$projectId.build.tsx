@@ -1,9 +1,8 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 
+import { ProjectSceneLayout } from "@/components/ProjectSceneLayout";
 import { StatusDot } from "@/components/StatusDot";
-import { StepNav } from "@/components/StepNav";
-import { useBuild, useProject } from "@/lib/api";
+import { useBuild, useLatestBuild } from "@/lib/api";
 
 export const Route = createFileRoute("/p/$projectId/build")({
   component: BuildScreen,
@@ -11,64 +10,98 @@ export const Route = createFileRoute("/p/$projectId/build")({
 
 function BuildScreen() {
   const { projectId } = Route.useParams();
-  const { data: project } = useProject(projectId);
   const build = useBuild(projectId);
-  const [latestBuild, setLatestBuild] = useState<Awaited<ReturnType<typeof build.mutateAsync>> | null>(null);
+  const { data: latest } = useLatestBuild(projectId);
+  const navigate = useNavigate();
+
+  const running = latest?.status === "pending" || latest?.status === "running";
 
   return (
-    <>
-      <StepNav projectId={projectId} current="build" />
-      <div className="flex-1 p-10 overflow-auto">
-        <header className="mb-8">
-          <h1 className="text-2xl">{project?.name ?? "…"}</h1>
-          <p className="text-sm text-muted-foreground mt-1.5">
-            Build an MJCF physics scene. In PR-A the project's mesh is the procedural sample
-            room. PR-B replaces this with the project's latest reconstruction.
-          </p>
-        </header>
+    <ProjectSceneLayout projectId={projectId} current="build">
+      <header>
+        <h1 className="text-2xl">Build</h1>
+        <p className="text-sm text-muted-foreground mt-1.5">
+          Turn the validated mesh into an MJCF physics scene with convex
+          collision hulls.
+        </p>
+      </header>
 
-        <button
-          disabled={build.isPending}
-          onClick={async () => setLatestBuild(await build.mutateAsync())}
-          className="px-3 py-1.5 rounded-sm bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 disabled:opacity-50"
-        >
-          {build.isPending ? "Building…" : "Build env"}
-        </button>
+      <button
+        disabled={build.isPending || running}
+        onClick={() => build.mutate()}
+        className="mt-6 px-4 py-2 rounded-sm border-2 border-primary text-primary text-sm font-medium hover:bg-primary/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+      >
+        {running ? "Building…" : build.isPending ? "Queuing…" : latest ? "Re-build env" : "Build env"}
+      </button>
 
-        {build.error && (
-          <p className="mt-4 text-sm text-[var(--status-fail)] mono">
-            {String((build.error as Error).message)}
-          </p>
-        )}
+      {build.error && (
+        <p className="mt-3 text-sm text-[var(--status-fail)] mono">
+          {String((build.error as Error).message)}
+        </p>
+      )}
 
-        {latestBuild && (
-          <section className="mt-8 max-w-xl border border-border rounded-sm">
-            <header className="px-4 py-2 border-b border-border flex items-center justify-between">
-              <span className="mono text-xs uppercase tracking-wider text-muted-foreground">
-                Latest build
-              </span>
-              <StatusDot status="ok" label="ready" />
-            </header>
-            <dl className="grid grid-cols-2 gap-y-2 gap-x-4 p-4 text-sm mono">
-              <dt className="text-muted-foreground">id</dt>
-              <dd>{latestBuild.id}</dd>
-              <dt className="text-muted-foreground">hulls</dt>
-              <dd>{latestBuild.n_hulls}</dd>
-              <dt className="text-muted-foreground">bounds</dt>
-              <dd>
-                [{latestBuild.bounds.min.map((n: number) => n.toFixed(2)).join(", ")}] →
-                [{latestBuild.bounds.max.map((n: number) => n.toFixed(2)).join(", ")}]
-              </dd>
-              <dt className="text-muted-foreground">spawn</dt>
-              <dd>
-                x ∈ [{latestBuild.spawn_region.xmin.toFixed(2)}, {latestBuild.spawn_region.xmax.toFixed(2)}],
-                {" "}
-                y ∈ [{latestBuild.spawn_region.ymin.toFixed(2)}, {latestBuild.spawn_region.ymax.toFixed(2)}]
-              </dd>
-            </dl>
-          </section>
-        )}
-      </div>
-    </>
+      {latest && (
+        <section className="mt-8 border border-border rounded-sm">
+          <header className="px-4 py-2 border-b border-border flex items-center justify-between">
+            <span className="mono text-[11px] uppercase tracking-wider text-muted-foreground">
+              latest build
+            </span>
+            <StatusDot
+              status={
+                latest.status === "ok"
+                  ? "ok"
+                  : latest.status === "failed"
+                  ? "fail"
+                  : "warn"
+              }
+              label={latest.status}
+            />
+          </header>
+          {latest.status === "failed" && (
+            <p className="px-4 py-3 text-xs text-[var(--status-fail)] mono">
+              {latest.error ?? "unknown error"}
+            </p>
+          )}
+          {latest.status === "ok" && (
+            <>
+              <dl className="grid grid-cols-2 gap-y-2 gap-x-4 p-4 text-xs mono">
+                <dt className="text-muted-foreground">id</dt>
+                <dd className="break-all">{latest.id}</dd>
+                <dt className="text-muted-foreground">hulls</dt>
+                <dd>{latest.n_hulls}</dd>
+                {latest.bounds && (
+                  <>
+                    <dt className="text-muted-foreground">bounds</dt>
+                    <dd className="text-[10px]">
+                      [{latest.bounds.min.map((n) => n.toFixed(2)).join(", ")}] → [
+                      {latest.bounds.max.map((n) => n.toFixed(2)).join(", ")}]
+                    </dd>
+                  </>
+                )}
+                {latest.spawn_region && (
+                  <>
+                    <dt className="text-muted-foreground">spawn</dt>
+                    <dd className="text-[10px]">
+                      x ∈ [{latest.spawn_region.xmin.toFixed(2)},{" "}
+                      {latest.spawn_region.xmax.toFixed(2)}], y ∈ [
+                      {latest.spawn_region.ymin.toFixed(2)},{" "}
+                      {latest.spawn_region.ymax.toFixed(2)}]
+                    </dd>
+                  </>
+                )}
+              </dl>
+              <footer className="px-4 py-3 border-t border-border">
+                <button
+                  onClick={() => navigate({ to: "/p/$projectId/train", params: { projectId } })}
+                  className="px-3 py-1.5 rounded-sm border border-border text-xs hover:bg-accent"
+                >
+                  Continue to Train →
+                </button>
+              </footer>
+            </>
+          )}
+        </section>
+      )}
+    </ProjectSceneLayout>
   );
 }

@@ -62,7 +62,62 @@ def make_sample_room(
         obs.apply_translation((x, ext[1] / 2, z))
         parts.append(obs)
 
+    # Chair: seat, backrest, four legs. Centered roughly mid-room, rotated
+    # slightly off-axis so it doesn't lattice with the box obstacles.
+    cx = float(rng.uniform(-sx / 2 + margin, sx / 2 - margin))
+    cz = float(rng.uniform(-sz / 2 + margin, sz / 2 - margin))
+    chair_yaw = float(rng.uniform(0, np.pi))
+    parts.extend(_make_chair(center=(cx, 0.0, cz), yaw=chair_yaw))
+
     return trimesh.util.concatenate(parts)
+
+
+def _make_chair(
+    center: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    yaw: float = 0.0,
+    seat_w: float = 0.45,
+    seat_d: float = 0.45,
+    seat_h: float = 0.06,
+    seat_z_off_floor: float = 0.45,
+    leg_w: float = 0.05,
+    back_h: float = 0.45,
+) -> list[trimesh.Trimesh]:
+    """Build a simple chair from boxes. Floor is at y=0, chair stands on it."""
+    parts: list[trimesh.Trimesh] = []
+
+    # Seat
+    seat = trimesh.creation.box(extents=(seat_w, seat_h, seat_d))
+    seat.apply_translation((0, seat_z_off_floor + seat_h / 2, 0))
+    parts.append(seat)
+
+    # Backrest
+    back = trimesh.creation.box(extents=(seat_w, back_h, seat_h))
+    back.apply_translation(
+        (0, seat_z_off_floor + seat_h + back_h / 2, -seat_d / 2 + seat_h / 2)
+    )
+    parts.append(back)
+
+    # Four legs
+    leg_h = seat_z_off_floor
+    leg_offsets = [
+        (seat_w / 2 - leg_w / 2, seat_d / 2 - leg_w / 2),
+        (-(seat_w / 2 - leg_w / 2), seat_d / 2 - leg_w / 2),
+        (seat_w / 2 - leg_w / 2, -(seat_d / 2 - leg_w / 2)),
+        (-(seat_w / 2 - leg_w / 2), -(seat_d / 2 - leg_w / 2)),
+    ]
+    for lx, lz in leg_offsets:
+        leg = trimesh.creation.box(extents=(leg_w, leg_h, leg_w))
+        leg.apply_translation((lx, leg_h / 2, lz))
+        parts.append(leg)
+
+    # Rotate chair around Y, then translate to center.
+    rot = trimesh.transformations.rotation_matrix(yaw, [0, 1, 0])
+    cx, cy, cz = center
+    trans = trimesh.transformations.translation_matrix([cx, cy, cz])
+    transform = trans @ rot
+    for p in parts:
+        p.apply_transform(transform)
+    return parts
 
 
 def write_sample_room(path: str | Path, **kwargs) -> Path:

@@ -111,7 +111,7 @@ function Train() {
             const p = await train.mutateAsync({ total_steps: steps, n_envs: nEnvs, seed });
             setActivePolicyId(p.id);
           }}
-          className="px-3 py-1.5 rounded-sm bg-primary text-primary-foreground text-sm hover:opacity-90 disabled:opacity-50"
+          className="px-4 py-2 rounded-sm border-2 border-primary text-primary text-sm font-medium hover:bg-primary/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
           {running ? "Training…" : "Train PPO"}
         </button>

@@ -25,11 +25,32 @@ from src.features.reconstruction.backends.base import (
 )
 
 
+def _vggt_available() -> bool:
+    """Accept either the official `vggt` package (CUDA) or the `vggt_mps`
+    community fork (Apple Metal). Both ship under different module names."""
+    try:
+        import torch
+    except ImportError:
+        return False
+    if not (torch.cuda.is_available() or torch.backends.mps.is_available()):
+        return False
+    try:
+        import vggt  # noqa: F401
+        return True
+    except ImportError:
+        pass
+    try:
+        import vggt_mps  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
 @register
 class VGGTBackend(ReconstructionBackend):
     name = "vggt"
     requires_gpu = True
-    implemented = True
+    implemented = _vggt_available()
 
     def reconstruct(
         self,

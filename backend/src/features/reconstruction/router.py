@@ -89,32 +89,22 @@ async def queue_reconstruction(
     db.commit()
     db.refresh(recon)
 
-    # Best-effort: also emit the Inngest event so the dev-server dashboard
-    # shows the run. Real durable execution via Inngest is PR-E polish work;
-    # for now the worker path below does the actual reconstruction in a
-    # background thread so the demo runs end-to-end without Inngest.
-    try:
-        await inngest_client.send(
-            events=[
-                inngest.Event(
-                    name="reconstruction/requested",
-                    data={
-                        "reconstruction_id": recon.id,
-                        "backend": backend_name,
-                        "params": body.params,
-                    },
-                )
-            ]
-        )
-    except Exception:
-        pass
-
-    threading.Thread(
-        target=_run_reconstruction_blocking,
-        args=(recon.id, backend_name, body.params),
-        daemon=True,
-        name=f"recon-{recon.id}",
-    ).start()
+    # Inngest is the single source of truth now. The durable function in
+    # backend/src/features/reconstruction/inngest_functions.py picks up
+    # the event, runs extract_frames → run_backend → persist, and writes
+    # the row's status from pending → ok/failed.
+    await inngest_client.send(
+        events=[
+            inngest.Event(
+                name="reconstruction/requested",
+                data={
+                    "reconstruction_id": recon.id,
+                    "backend": backend_name,
+                    "params": body.params,
+                },
+            )
+        ]
+    )
 
     return recon
 
