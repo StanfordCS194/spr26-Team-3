@@ -1,6 +1,6 @@
 @import "tailwindcss";
-@import "geist/font/sans.css";
-@import "geist/font/mono.css";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
 
 @theme {
   --font-sans: "Geist Variable", system-ui, sans-serif;
