@@ -52,6 +52,12 @@ def health() -> dict:
 # Feature routers — every screen in the SPA maps to one of these.
 app.include_router(projects_router, prefix="/api/projects", tags=["projects"])
 app.include_router(reconstruction_router, prefix="/api", tags=["reconstruction"])
+
+# Static files: meshes, point clouds, thumbnails — read-only by frontend.
+from fastapi.staticfiles import StaticFiles  # noqa: E402
+_data_dir = _settings.data_dir
+_data_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/data", StaticFiles(directory=str(_data_dir)), name="data")
 app.include_router(validation_router, prefix="/api/projects", tags=["validation"])
 app.include_router(builds_router, prefix="/api/projects", tags=["builds"])
 app.include_router(training_router, prefix="/api/projects", tags=["training"])
