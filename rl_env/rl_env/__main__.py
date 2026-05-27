@@ -6,10 +6,16 @@ Subcommands:
   demo                          procedural sample room -> full pipeline -> rollout
   train  MJCF [--steps N]       train PPO
   play   MJCF --ckpt ZIP        evaluate trained policy
+  serve  [--host H --port P]    Flask UI for the `prototype/v4*.html` browser
+                                reconstruction prototypes (matthew's pipeline)
 
-Web UI removed in the worldscan-v2-video-product change; the new FastAPI
-backend under backend/ serves the same routes plus video reconstruction
-and validation. This module remains as a headless CLI.
+The new FastAPI backend under `backend/` is the canonical product surface
+(video reconstruction, training, validation). `serve` here is kept so the
+browser-side photo-to-mesh prototypes (`prototype/v4.html`, `v4.2.html`)
+remain runnable as a backup / reference implementation — they're the only
+flow that does SuperPoint+LightGlue feature matching + metric depth fusion
+client-side. See `backend/src/features/reconstruction/backends/depth_fusion.py`
+for the server-side port (change `worldscan-v2.3-depth-fusion`).
 """
 from __future__ import annotations
 
@@ -95,6 +101,13 @@ def _cmd_run(args: argparse.Namespace) -> int:
     print(f"  avg reward: {total_reward / args.episodes:.2f}")
     print(f"  total steps: {total_steps}  ({total_steps / max(elapsed, 1e-6):.0f} steps/s)")
     env.close()
+    return 0
+
+
+def _cmd_serve(args: argparse.Namespace) -> int:
+    from rl_env.server import serve
+
+    serve(host=args.host, port=args.port)
     return 0
 
 
@@ -188,6 +201,11 @@ def main(argv: list[str] | None = None) -> int:
     pd.add_argument("--seed", type=int, default=0)
     pd.add_argument("--policy", choices=["random", "greedy"], default="greedy")
     pd.set_defaults(func=_cmd_demo)
+
+    ps = sub.add_parser("serve", help="Flask UI for the v4/v4.2 browser prototypes")
+    ps.add_argument("--host", default="127.0.0.1")
+    ps.add_argument("--port", type=int, default=5174)
+    ps.set_defaults(func=_cmd_serve)
 
     pt = sub.add_parser("train", help="train PPO on a built MJCF")
     pt.add_argument("mjcf", help="path to scene.xml")
