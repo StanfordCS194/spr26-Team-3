@@ -1,0 +1,24 @@
+{
+  "name": "worldscan",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Video → physical RL environment. CS194W Stanford Spring 2026.",
+  "type": "module",
+  "workspaces": [
+    "frontend",
+    "shared"
+  ],
+  "packageManager": "yarn@4.5.0",
+  "scripts": {
+    "dev": "docker compose up --watch",
+    "dev:frontend": "yarn workspace @worldscan/frontend dev",
+    "build": "yarn workspaces foreach -A run build",
+    "lint": "yarn workspaces foreach -A run lint",
+    "typecheck": "yarn workspaces foreach -A run typecheck",
+    "format": "yarn workspaces foreach -A run format",
+    "typegen": "curl -s http://localhost:8000/openapi.json > shared/openapi.json && yarn workspace @worldscan/shared run codegen"
+  },
+  "devDependencies": {
+    "prettier": "^3.3.3"
+  }
+}

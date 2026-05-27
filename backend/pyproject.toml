@@ -1,0 +1,76 @@
+[project]
+name = "worldscan-backend"
+version = "0.2.0"
+description = "FastAPI backend for WorldScan. Wraps rl_env, orchestrates Inngest jobs."
+requires-python = ">=3.13"
+dependencies = [
+    # web
+    "fastapi>=0.118",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "python-multipart>=0.0.20",  # multipart uploads
+    "httpx>=0.28",
+
+    # db
+    "sqlalchemy>=2.0",
+    "alembic>=1.14",
+    "psycopg[binary]>=3.2",
+
+    # jobs
+    "inngest>=0.4",
+
+    # media + ml libs that the worker needs
+    "ffmpeg-python>=0.2",
+    "pillow>=11",
+
+    # rl + sim (matches root requirements.txt; pinned at the floor)
+    "mujoco>=3.2",
+    "trimesh>=4.4",
+    "numpy>=1.26",
+    "gymnasium>=0.29",
+    "stable-baselines3>=2.3",
+    "torch>=2.2",
+    "scipy>=1.11",
+
+    # observability
+    "sentry-sdk[fastapi]>=2.18",
+
+    # utility
+    "nanoid>=2.0",
+
+    # workspace member: shares the same venv so `from rl_env...` works
+    "rl_env",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "testcontainers[postgres]>=4.9",
+    "ruff>=0.7",
+    "black>=24.10",
+    "mypy>=1.13",
+]
+
+[tool.uv.sources]
+rl_env = { workspace = true }
+
+[tool.uv.workspace]
+members = [".", "../rl_env"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "C4"]
+ignore = ["E501"]  # let black handle line length
+
+[tool.black]
+line-length = 100
+target-version = ["py313"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

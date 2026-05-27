@@ -1,0 +1,90 @@
+name: worldscan
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: worldscan
+      POSTGRES_PASSWORD: worldscan
+      POSTGRES_DB: worldscan
+    ports:
+      - "5433:5432"   # 5432 is taken by Haleum's pg on this host
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U worldscan"]
+      interval: 2s
+      retries: 20
+
+  inngest-dev:
+    image: inngest/inngest:latest
+    command: ["inngest", "dev", "-u", "http://api:8000/api/inngest", "--no-discovery"]
+    ports:
+      - "8289:8288"   # 8288 is taken by Haleum's inngest on this host
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: ["uv", "run", "uvicorn", "src.app:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://worldscan:worldscan@postgres:5432/worldscan
+      INNGEST_DEV_SERVER_URL: http://inngest-dev:8288
+      DATA_DIR: /data
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - ./rl_env:/app/rl_env
+      - ./data:/data
+    develop:
+      watch:
+        - action: sync
+          path: ./backend/src
+          target: /app/src
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: ["uv", "run", "python", "-m", "src.worker"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://worldscan:worldscan@postgres:5432/worldscan
+      INNGEST_DEV_SERVER_URL: http://inngest-dev:8288
+      DATA_DIR: /data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      inngest-dev:
+        condition: service_started
+    volumes:
+      - ./backend:/app
+      - ./rl_env:/app/rl_env
+      - ./data:/data
+    develop:
+      watch:
+        - action: sync
+          path: ./backend/src
+          target: /app/src
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    command: ["yarn", "dev", "--host", "0.0.0.0"]
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: http://localhost:8000
+      VITE_INNGEST_URL: http://localhost:8288
+    volumes:
+      - ./frontend:/app
+      - ./shared:/shared
+      - frontend_node_modules:/app/node_modules
+
+volumes:
+  pgdata:
+  frontend_node_modules:

@@ -4,6 +4,18 @@ Subcommands:
   build  MESH [--out DIR]      mesh -> MJCF + collision hulls
   run    MJCF [--episodes N]   load MJCF, roll random policy, print stats
   demo                          procedural sample room -> full pipeline -> rollout
+  train  MJCF [--steps N]       train PPO
+  play   MJCF --ckpt ZIP        evaluate trained policy
+  serve  [--host H --port P]    Flask UI for the `prototype/v4*.html` browser
+                                reconstruction prototypes (matthew's pipeline)
+
+The new FastAPI backend under `backend/` is the canonical product surface
+(video reconstruction, training, validation). `serve` here is kept so the
+browser-side photo-to-mesh prototypes (`prototype/v4.html`, `v4.2.html`)
+remain runnable as a backup / reference implementation — they're the only
+flow that does SuperPoint+LightGlue feature matching + metric depth fusion
+client-side. See `backend/src/features/reconstruction/backends/depth_fusion.py`
+for the server-side port (change `worldscan-v2.3-depth-fusion`).
 """
 from __future__ import annotations
 
@@ -190,7 +202,7 @@ def main(argv: list[str] | None = None) -> int:
     pd.add_argument("--policy", choices=["random", "greedy"], default="greedy")
     pd.set_defaults(func=_cmd_demo)
 
-    ps = sub.add_parser("serve", help="start local Flask server (browser UI)")
+    ps = sub.add_parser("serve", help="Flask UI for the v4/v4.2 browser prototypes")
     ps.add_argument("--host", default="127.0.0.1")
     ps.add_argument("--port", type=int, default=5174)
     ps.set_defaults(func=_cmd_serve)

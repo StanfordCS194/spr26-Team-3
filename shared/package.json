@@ -1,0 +1,17 @@
+{
+  "name": "@worldscan/shared",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./ts/api": "./ts/api.d.ts",
+    "./openapi.json": "./openapi.json"
+  },
+  "scripts": {
+    "codegen": "openapi-typescript ./openapi.json -o ./ts/api.d.ts"
+  },
+  "devDependencies": {
+    "openapi-typescript": "^7.5.0",
+    "typescript": "^5.7.2"
+  }
+}

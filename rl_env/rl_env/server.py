@@ -24,7 +24,8 @@ from flask import Flask, jsonify, redirect, request, send_from_directory
 from rl_env.build import BuildConfig, build_environment
 from rl_env.env import NavEnv, TaskConfig
 
-ROOT = Path(__file__).resolve().parent.parent
+# File lives at rl_env/rl_env/server.py; repo root is three parents up.
+ROOT = Path(__file__).resolve().parent.parent.parent
 PROTOTYPE_DIR = ROOT / "prototype"
 BUILDS_DIR = ROOT / "server_builds"
 MODELS_CACHE_DIR = ROOT / "server_builds" / "models"

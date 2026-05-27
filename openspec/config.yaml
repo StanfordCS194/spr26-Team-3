@@ -1,0 +1,28 @@
+# OpenSpec config for WorldScan.
+# Generated structure; refresh with `openspec init` when the CLI is installed.
+
+project:
+  name: WorldScan
+  slug: worldscan
+  description: >
+    Turn a recording of a real room into a physically simulated environment
+    that an RL agent can be trained inside. CS194W (Stanford, Spring 2026).
+
+team:
+  - matthew-kim
+  - adarsh-ambati
+  - andrew-sung
+  - kevin-wang
+  - aditya-iyengar
+
+paths:
+  specs: specs
+  changes: changes
+  archive: changes/archive
+
+conventions:
+  scenario_keywords: [WHEN, THEN, AND, GIVEN]   # GIVEN optional per upstream
+  pr_strategy: multi-pr-per-change              # change spans N PRs; archive on final PR
+  acceptance: every PR must leave the product in a runnable state ("pause stage")
+
+current_change: worldscan-v2-video-product
