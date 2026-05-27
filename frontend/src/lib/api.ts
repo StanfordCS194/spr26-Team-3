@@ -58,6 +58,39 @@ async function send<T>(url: string, method: "POST" | "PATCH" | "DELETE", body?: 
 export const useProjects = () =>
   useQuery({ queryKey: ["projects"], queryFn: () => get<Project[]>("/api/projects") });
 
+export type ProjectSummary = {
+  id: string;
+  name: string;
+  created_at: string;
+  thumbnail_path: string | null;
+  status_pill: string;
+  n_runs: number;
+};
+
+export const useProjectsSummary = () =>
+  useQuery({
+    queryKey: ["projects-summary"],
+    queryFn: () => get<ProjectSummary[]>("/api/projects/summary"),
+    refetchInterval: 4000,
+  });
+
+export type RunRow = {
+  id: string;
+  policy_id: string | null;
+  baseline: string | null;
+  episodes: number;
+  successes: number;
+  avg_reward: number;
+  created_at: string;
+};
+
+export const useProjectRuns = (projectId: string) =>
+  useQuery({
+    queryKey: ["runs", projectId],
+    queryFn: () => get<RunRow[]>(`/api/projects/${projectId}/runs`),
+    enabled: !!projectId,
+  });
+
 export const useProject = (id: string) =>
   useQuery({
     queryKey: ["project", id],
