@@ -29,9 +29,9 @@ Generates a synthetic room, builds the MJCF, runs a greedy goal-seeking policy. 
 python -m rl_env serve
 ```
 
-Then open <http://127.0.0.1:5174/>. The page is `prototype/v1.html` with two extra sections:
+Then open <http://127.0.0.1:5174/>. The server redirects to `prototype/v4.html` — matthew's multi-photo metric-depth reconstruction prototype — with sections for:
 
-1. Drop a photo → click Reconstruct (browser-side photo-to-mesh, unchanged from the standalone v1).
+1. Drop one or more photos → click Reconstruct. Browser runs SuperPoint+LightGlue feature matching and pose alignment; the server (`/api/depth`) runs Depth-Anything-V2 (default) or Apple Depth-Pro (`prototype/v4.2.html`) for metric depth.
 2. **Build RL env** — uploads the in-memory mesh to the server, runs the Tier 1 pipeline, shows hulls / bounds / spawn region.
 3. **Run rollout** — runs the greedy or random policy in the Gym env, shows per-episode reward / distance / success.
 
@@ -40,7 +40,7 @@ If the server is offline, the RL section greys out and the standalone Photo→3D
 ## CLI workflow (no browser)
 
 ```bash
-# 1. From prototype/v1.html, click OBJ to export.
+# 1. From prototype/v4.html (or v1/v2/v3 in archive/legacy/), click OBJ to export.
 # 2. Build the env:
 python -m rl_env build path/to/worldscan.obj --out build/ --up y --diag 6
 
