@@ -293,3 +293,9 @@ def sync_replay(
     r.trajectories_path = str(traj_path)
     r.status = "ok"
     db.commit()
+
+
+def sync_task_codegen(db: Session, task_id: str) -> None:
+    from src.features.tasks.service import run_task_codegen
+
+    run_task_codegen(db, task_id)

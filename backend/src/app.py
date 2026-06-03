@@ -13,6 +13,7 @@ from src.features.projects.router import router as projects_router
 from src.features.reconstruction.router import router as reconstruction_router
 from src.features.replay.router import router as replay_router
 from src.features.tasks.router import router as tasks_router
+from src.features.tasks import inngest_functions as _task_fns  # noqa: F401
 from src.features.training.router import router as training_router
 from src.features.validation.router import router as validation_router
 from src.inngest_client import FUNCTIONS, inngest_client

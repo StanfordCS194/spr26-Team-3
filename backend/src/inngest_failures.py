@@ -18,7 +18,7 @@ import inngest
 
 from src.db import SessionLocal
 from src.inngest_client import inngest_client, register
-from src.models import Build, Reconstruction, Run, Validation
+from src.models import Build, Reconstruction, Run, Task, Validation
 
 if TYPE_CHECKING:
     from src.db import Base
@@ -31,6 +31,7 @@ _MARKERS: list[tuple[str, type["Base"], str]] = [
     ("build-env", Build, "build_id"),
     ("validate-mesh", Validation, "validation_id"),
     ("run-replay", Run, "run_id"),
+    ("generate-task", Task, "task_id"),
 ]
 
 

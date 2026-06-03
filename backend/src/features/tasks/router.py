@@ -5,12 +5,15 @@ uses the legacy NavEnv until PR-4.
 """
 from __future__ import annotations
 
+import inngest
 from fastapi import APIRouter, HTTPException
 from nanoid import generate as nanoid
 
+from src.config import get_settings
 from src.deps import DbSession, ProjectDep
+from src.inngest_client import inngest_client
 from src.features.tasks import service
-from src.models import Task
+from src.models import Build, Task
 from src.schemas import TaskCreate, TaskOut, TaskPatch
 
 router = APIRouter()
@@ -106,4 +109,40 @@ def patch_task(
 
     db.commit()
     db.refresh(task)
+    return _to_out(task)
+
+
+@router.post("/{project_id}/tasks/{task_id}/generate", response_model=TaskOut)
+async def trigger_generate(project: ProjectDep, task_id: str, db: DbSession) -> TaskOut:
+    """Queue Claude codegen + sandbox validation. Poll GET until status is ready/failed."""
+    task = service.get_task_for_project(db, project.id, task_id)
+    if not task:
+        raise HTTPException(404, f"unknown task {task_id}")
+    if task.status == "generating":
+        raise HTTPException(409, "task is already generating")
+
+    settings = get_settings()
+    if not settings.anthropic_api_key:
+        raise HTTPException(
+            503,
+            "task codegen is not configured — set ANTHROPIC_API_KEY in the backend environment",
+        )
+
+    build = db.get(Build, task.build_id)
+    if not build or not build.mjcf_path:
+        raise HTTPException(400, "no built scene for this task — run Build first")
+
+    task.status = "generating"
+    task.error = None
+    db.commit()
+    db.refresh(task)
+
+    await inngest_client.send(
+        events=[
+            inngest.Event(
+                name="task/codegen_requested",
+                data={"task_id": task.id},
+            )
+        ]
+    )
     return _to_out(task)

@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     # Sentry — empty disables it
     sentry_dsn: str = ""
 
+    # Task codegen (PR-2) — empty disables Generate until set
+    anthropic_api_key: str = ""
+    anthropic_task_model: str = "claude-sonnet-4-20250514"
+
     # Build / RL defaults (exposed in the frontend's Advanced panel)
     default_target_diagonal_m: float = 6.0
     default_max_hulls: int = 64

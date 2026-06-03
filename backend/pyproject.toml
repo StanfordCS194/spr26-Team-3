@@ -44,6 +44,9 @@ dependencies = [
     # utility
     "nanoid>=2.0",
 
+    # task codegen (worldscan-v3-rl-authoring PR-2)
+    "anthropic>=0.49",
+
     # workspace member: shares the same venv so `from rl_env...` works
     "rl_env",
 ]

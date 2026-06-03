@@ -11,11 +11,11 @@ Sequenced as small PRs, each one leaving the product in a runnable state.
 
 ## PR-2 — Codegen via Inngest
 
-- [ ] `task/codegen_requested` Inngest event + function (`backend/src/features/tasks/inngest_functions.py`).
-- [ ] Claude API client (`anthropic` Python SDK already pinned in Haleum — copy the pattern).
-- [ ] Prompt template that injects mesh bounds, spawn region, NL fields, optional goal_3d.
-- [ ] `task.status` flips drafting → generating → ready/failed via the same generic `mark_row_failed` handler.
-- [ ] `backend/src/rl/task_runtime.py`: restricted `exec()` loader, timeout wrapper, validator that the loaded module defines `GeneratedTask(Task)`.
+- [x] `task/codegen_requested` Inngest event + function (`backend/src/features/tasks/inngest_functions.py`).
+- [x] Claude API client (`anthropic` Python SDK already pinned in Haleum — copy the pattern).
+- [x] Prompt template that injects mesh bounds, spawn region, NL fields, optional goal_3d.
+- [x] `task.status` flips drafting → generating → ready/failed via the same generic `mark_row_failed` handler.
+- [x] `backend/src/rl/task_runtime.py`: restricted `exec()` loader, timeout wrapper, validator that the loaded module defines `GeneratedTask(Task)`.
 
 ## PR-3 — Task screen (frontend)
 
