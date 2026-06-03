@@ -4,10 +4,10 @@ Sequenced as small PRs, each one leaving the product in a runnable state.
 
 ## PR-1 — Task data model + ABC
 
-- [ ] Alembic migration: `task`, `task_version` tables; `policy.task_version_id` FK.
-- [ ] `backend/src/rl/task_abc.py`: the `Task` abstract base, obs/action space helpers, validate signature.
-- [ ] `backend/src/features/tasks/router.py`: CRUD endpoints `POST /api/projects/{id}/tasks`, `GET .../tasks`, `GET .../tasks/{tid}`, `PATCH` for NL field edits.
-- [ ] Pause-stage: Train still uses the hardcoded task (existing behavior) — no UI change yet.
+- [x] Alembic migration: `task`, `task_version` tables; `policy.task_version_id` FK.
+- [x] `backend/src/rl/task_abc.py`: the `Task` abstract base, obs/action space helpers, validate signature.
+- [x] `backend/src/features/tasks/router.py`: CRUD endpoints `POST /api/projects/{id}/tasks`, `GET .../tasks`, `GET .../tasks/{tid}`, `PATCH` for NL field edits.
+- [x] Pause-stage: Train still uses the hardcoded task (existing behavior) — no UI change yet.
 
 ## PR-2 — Codegen via Inngest
 

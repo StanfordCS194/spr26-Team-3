@@ -6,7 +6,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from nanoid import generate as nanoid
-from sqlalchemy import Boolean, Float, ForeignKey, Integer, String
+from sqlalchemy import Boolean, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -30,6 +30,9 @@ class Project(Base):
         back_populates="project", cascade="all, delete-orphan"
     )
     builds: Mapped[list[Build]] = relationship(
+        back_populates="project", cascade="all, delete-orphan"
+    )
+    tasks: Mapped[list[Task]] = relationship(
         back_populates="project", cascade="all, delete-orphan"
     )
 
@@ -87,12 +90,64 @@ class Build(Base):
     policies: Mapped[list[Policy]] = relationship(
         back_populates="build", cascade="all, delete-orphan"
     )
+    tasks: Mapped[list[Task]] = relationship(
+        back_populates="build", cascade="all, delete-orphan"
+    )
+
+
+class Task(Base):
+    __tablename__ = "task"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_id)
+    project_id: Mapped[str] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"))
+    build_id: Mapped[str] = mapped_column(ForeignKey("build.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String, default="Task")
+    objective_nl: Mapped[str] = mapped_column(Text, default="")
+    env_nl: Mapped[str] = mapped_column(Text, default="")
+    agent_nl: Mapped[str] = mapped_column(Text, default="")
+    goal_3d: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    status: Mapped[str] = mapped_column(String, default="drafting")
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    codegen_model: Mapped[str | None] = mapped_column(String, nullable=True)
+    codegen_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    current_version_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("task_version.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+    project: Mapped[Project] = relationship(back_populates="tasks")
+    build: Mapped[Build] = relationship(back_populates="tasks")
+    versions: Mapped[list[TaskVersion]] = relationship(
+        back_populates="task",
+        cascade="all, delete-orphan",
+        foreign_keys="TaskVersion.task_id",
+    )
+    current_version: Mapped[TaskVersion | None] = relationship(
+        foreign_keys=[current_version_id],
+        post_update=True,
+    )
+
+
+class TaskVersion(Base):
+    __tablename__ = "task_version"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_id)
+    task_id: Mapped[str] = mapped_column(ForeignKey("task.id", ondelete="CASCADE"))
+    code: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[str] = mapped_column(String, default="user")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+    task: Mapped[Task] = relationship(
+        back_populates="versions",
+        foreign_keys=[task_id],
+    )
 
 
 class Policy(Base):
     __tablename__ = "policy"
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_id)
     build_id: Mapped[str] = mapped_column(ForeignKey("build.id", ondelete="CASCADE"))
+    task_version_id: Mapped[str | None] = mapped_column(
+        ForeignKey("task_version.id", ondelete="SET NULL"), nullable=True
+    )
     algo: Mapped[str] = mapped_column(String, default="ppo")
     ckpt_path: Mapped[str] = mapped_column(String)
     total_steps: Mapped[int] = mapped_column(Integer)

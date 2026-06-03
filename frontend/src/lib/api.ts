@@ -110,6 +110,7 @@ export type ProjectState = {
   reconstruct: StageState;
   validate: StageState;
   build: StageState;
+  task: StageState;
   train: StageState;
   replay: StageState;
 };

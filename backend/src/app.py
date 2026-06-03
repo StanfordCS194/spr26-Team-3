@@ -12,6 +12,7 @@ from src.features.builds.router import router as builds_router
 from src.features.projects.router import router as projects_router
 from src.features.reconstruction.router import router as reconstruction_router
 from src.features.replay.router import router as replay_router
+from src.features.tasks.router import router as tasks_router
 from src.features.training.router import router as training_router
 from src.features.validation.router import router as validation_router
 from src.inngest_client import FUNCTIONS, inngest_client
@@ -64,6 +65,7 @@ _data_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/data", StaticFiles(directory=str(_data_dir)), name="data")
 app.include_router(validation_router, prefix="/api/projects", tags=["validation"])
 app.include_router(builds_router, prefix="/api/projects", tags=["builds"])
+app.include_router(tasks_router, prefix="/api/projects", tags=["tasks"])
 app.include_router(training_router, prefix="/api/projects", tags=["training"])
 app.include_router(replay_router, prefix="/api/projects", tags=["replay"])
 

@@ -11,8 +11,10 @@ import io
 import zipfile
 from pathlib import Path
 
+from tests.job_helpers import sync_build, sync_reconstruct, sync_replay, sync_validate
 
-def test_full_pipeline(client, tmp_path, monkeypatch) -> None:
+
+def test_full_pipeline(client, db, tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     from src.config import get_settings
     get_settings.cache_clear()
@@ -50,24 +52,23 @@ def test_full_pipeline(client, tmp_path, monkeypatch) -> None:
     )
     assert r.status_code == 200, r.text
     rid = r.json()["id"]
+    sync_reconstruct(db, rid, "demo_fixture")
 
-    # poll until done (in-process worker — should complete in <2s)
-    import time
-    for _ in range(20):
-        time.sleep(0.2)
-        r = client.get(f"/api/projects/{pid}/reconstruction")
-        if r.json() and r.json().get("status") in ("ok", "failed"):
-            break
+    r = client.get(f"/api/projects/{pid}/reconstruction")
     assert r.json()["status"] == "ok", r.json()
 
     # 4. validate
     r = client.post(f"/api/projects/{pid}/validate")
     assert r.status_code == 200, r.text
+    sync_validate(db, r.json()["id"])
+    r = client.get(f"/api/projects/{pid}/validate/latest")
     assert r.json()["report"]["overall"] in ("pass", "warn")
 
     # 5. build
     r = client.post(f"/api/projects/{pid}/build", json={"up_axis": "y"})
     assert r.status_code == 200, r.text
+    sync_build(db, r.json()["id"], up_axis="y")
+    r = client.get(f"/api/projects/{pid}/build/latest")
     assert r.json()["n_hulls"] >= 2
 
     # 6. replay greedy — should succeed on demo_fixture room
@@ -76,6 +77,17 @@ def test_full_pipeline(client, tmp_path, monkeypatch) -> None:
         json={"policy": "greedy", "episodes": 3, "max_steps": 200, "seed": 0},
     )
     assert r.status_code == 200
+    run_id = r.json()["id"]
+    sync_replay(
+        db,
+        run_id,
+        project_id=pid,
+        policy="greedy",
+        episodes=3,
+        max_steps=200,
+        seed=0,
+    )
+    r = client.get(f"/api/projects/{pid}/runs/{run_id}")
     assert r.json()["successes"] >= 2
 
     # 7. summary reflects the chain
