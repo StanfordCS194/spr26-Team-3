@@ -81,7 +81,7 @@ export function MeshViewer({ url, className }: { url: string; className?: string
         setLoad(
           geom.getAttribute("position")?.count
             ? { state: "ready" }
-            : { state: "error", msg: "The reconstruction produced an empty mesh." },
+            : { state: "error", msg: "The 3D scene came out empty. Try a clip with more overlap and detail." },
         );
       },
       undefined,
@@ -89,7 +89,7 @@ export function MeshViewer({ url, className }: { url: string; className?: string
         console.error("PLY load failed", err);
         setLoad({
           state: "error",
-          msg: "Couldn't load the reconstruction mesh — it may be missing or failed to generate.",
+          msg: "Couldn't load the 3D scene — it may be missing or failed to generate.",
         });
       },
     );
@@ -139,11 +139,11 @@ export function MeshViewer({ url, className }: { url: string; className?: string
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-6 text-center">
           {load.state === "loading" ? (
             <span className="mono text-xs text-muted-foreground animate-pulse">
-              loading mesh…
+              Loading 3D scene…
             </span>
           ) : (
             <span className="mono text-xs text-[var(--status-fail)] max-w-xs">
-              {load.msg ?? "Couldn't load the reconstruction mesh."}
+              {load.msg ?? "Couldn't load the 3D scene."}
             </span>
           )}
         </div>

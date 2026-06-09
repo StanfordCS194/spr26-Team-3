@@ -45,16 +45,17 @@ function RightPaneForProject({ projectId }: { projectId: string }) {
       ) : (
         <div className="w-full h-full border border-dashed border-border/60 rounded-sm flex items-center justify-center text-center px-6 text-xs mono">
           {status === "running" || status === "pending" ? (
-            <span className="text-muted-foreground animate-pulse">
-              reconstructing… the scene will appear here when it finishes
+            <span className="text-muted-foreground max-w-xs animate-pulse">
+              Building your 3D scene… this usually takes a minute or two and
+              appears here automatically when it's ready.
             </span>
           ) : status === "failed" ? (
             <span className="text-[var(--status-fail)] max-w-xs">
-              reconstruction failed: {recon?.error ?? "unknown error"}
+              Reconstruction didn't finish: {recon?.error ?? "something went wrong."}
             </span>
           ) : (
-            <span className="text-muted-foreground">
-              no mesh yet — finish Reconstruct to see the scene here
+            <span className="text-muted-foreground max-w-xs">
+              No 3D scene yet — run Reconstruct to generate one.
             </span>
           )}
         </div>
