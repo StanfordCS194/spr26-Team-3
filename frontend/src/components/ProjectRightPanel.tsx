@@ -32,8 +32,9 @@ export function ProjectRightPanel() {
 function RightPaneForProject({ projectId }: { projectId: string }) {
   const { data: recon } = useLatestReconstruction(projectId);
 
+  const status = recon?.status;
   const meshUrl =
-    recon?.mesh_path && recon.status === "ok"
+    recon?.mesh_path && status === "ok"
       ? meshPathToUrl(recon.mesh_path, projectId)
       : null;
 
@@ -42,8 +43,20 @@ function RightPaneForProject({ projectId }: { projectId: string }) {
       {meshUrl ? (
         <MeshViewer url={meshUrl} />
       ) : (
-        <div className="w-full h-full border border-dashed border-border/60 rounded-sm flex items-center justify-center text-xs text-muted-foreground mono">
-          no mesh yet — finish Reconstruct to see the scene here
+        <div className="w-full h-full border border-dashed border-border/60 rounded-sm flex items-center justify-center text-center px-6 text-xs mono">
+          {status === "running" || status === "pending" ? (
+            <span className="text-muted-foreground animate-pulse">
+              reconstructing… the scene will appear here when it finishes
+            </span>
+          ) : status === "failed" ? (
+            <span className="text-[var(--status-fail)] max-w-xs">
+              reconstruction failed: {recon?.error ?? "unknown error"}
+            </span>
+          ) : (
+            <span className="text-muted-foreground">
+              no mesh yet — finish Reconstruct to see the scene here
+            </span>
+          )}
         </div>
       )}
     </aside>

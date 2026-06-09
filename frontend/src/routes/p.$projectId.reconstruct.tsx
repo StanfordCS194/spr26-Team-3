@@ -23,7 +23,8 @@ function Reconstruct() {
   const { data: backends = [] } = useBackends();
   const { data: latest } = useLatestReconstruction(projectId);
   const reconstruct = useReconstruct(projectId);
-  const [picked, setPicked] = useState<string>("demo_fixture");
+  const [picked, setPicked] = useState<string>("depth_fusion");
+  const [fov, setFov] = useState<string>("");
 
   const captured = state?.capture.complete ?? false;
   const status = latest?.status ?? "none";
@@ -49,7 +50,7 @@ function Reconstruct() {
             <div>
               <p className="text-sm">Locked.</p>
               <p className="text-xs text-muted-foreground mt-1">
-                {state?.reconstruct.reason ?? "No video uploaded."}
+                {state?.reconstruct.reason ?? "No video or photo uploaded."}
               </p>
               <button
                 onClick={() =>
@@ -94,9 +95,37 @@ function Reconstruct() {
         />
       </div>
 
+      {picked === "depth_fusion" && (
+        <div className="mt-4">
+          <label className="mono text-[11px] uppercase tracking-wider text-muted-foreground">
+            FOV override (optional)
+          </label>
+          <div className="mt-1 flex items-center gap-2">
+            <input
+              type="number"
+              min="40"
+              max="120"
+              step="1"
+              value={fov}
+              disabled={running}
+              onChange={(e) => setFov(e.target.value)}
+              placeholder="auto"
+              className="w-24 bg-background border border-border rounded-sm px-2 py-1 text-sm mono disabled:opacity-50"
+            />
+            <span className="text-xs text-muted-foreground">
+              degrees — leave blank to auto-estimate (Depth-Pro)
+            </span>
+          </div>
+        </div>
+      )}
+
       <button
         disabled={running || reconstruct.isPending}
-        onClick={() => reconstruct.mutate({ backend: picked, params: {} })}
+        onClick={() => {
+          const f = parseFloat(fov);
+          const params = Number.isFinite(f) ? { fov_deg: f } : {};
+          reconstruct.mutate({ backend: picked, params });
+        }}
         className="mt-6 px-4 py-2 rounded-sm border-2 border-primary text-primary text-sm font-medium hover:bg-primary/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
       >
         {running
@@ -148,6 +177,21 @@ function Reconstruct() {
                   ran in {latest.elapsed_s.toFixed(1)}s
                 </span>
               )}
+              {(() => {
+                const p = latest.params ?? {};
+                const nFrames = Number(p.n_frames);
+                if (!Number.isFinite(nFrames)) return null;
+                const nFused = Number(p.n_fused);
+                const avgInliers = Number(p.avg_inliers);
+                return (
+                  <span className="text-xs text-muted-foreground mono">
+                    fused {Number.isFinite(nFused) ? nFused : "?"}/{nFrames - 1} frames
+                    {Number.isFinite(avgInliers) ? ` · avg ${avgInliers.toFixed(0)} inliers` : ""}
+                    {p.depth_model ? ` · ${String(p.depth_model)}` : ""}
+                    {Number.isFinite(Number(p.fov_deg)) ? ` · ${Number(p.fov_deg).toFixed(0)}° fov` : ""}
+                  </span>
+                );
+              })()}
               <button
                 onClick={() =>
                   navigate({ to: "/p/$projectId/validate", params: { projectId } })

@@ -3,19 +3,23 @@
  * cleanly under React 19. Loads a .ply, centers and normalizes it, gives
  * the user OrbitControls + a faint grid floor + a directional light.
  */
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { PLYLoader } from "three/examples/jsm/loaders/PLYLoader.js";
 
 import { cn } from "@/lib/utils";
 
+type LoadState = { state: "loading" | "ready" | "error"; msg?: string };
+
 export function MeshViewer({ url, className }: { url: string; className?: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const [load, setLoad] = useState<LoadState>({ state: "loading" });
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container || !url) return;
+    setLoad({ state: "loading" });
 
     const width = container.clientWidth || 800;
     const height = container.clientHeight || 600;
@@ -74,10 +78,19 @@ export function MeshViewer({ url, className }: { url: string; className?: string
         mesh.scale.setScalar(scale);
         mesh.position.y = (size.y * scale) / 2;
         scene.add(mesh);
+        setLoad(
+          geom.getAttribute("position")?.count
+            ? { state: "ready" }
+            : { state: "error", msg: "The reconstruction produced an empty mesh." },
+        );
       },
       undefined,
       (err) => {
         console.error("PLY load failed", err);
+        setLoad({
+          state: "error",
+          msg: "Couldn't load the reconstruction mesh — it may be missing or failed to generate.",
+        });
       },
     );
 
@@ -122,6 +135,19 @@ export function MeshViewer({ url, className }: { url: string; className?: string
       )}
     >
       <div ref={containerRef} className="absolute inset-0" />
+      {load.state !== "ready" && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-6 text-center">
+          {load.state === "loading" ? (
+            <span className="mono text-xs text-muted-foreground animate-pulse">
+              loading mesh…
+            </span>
+          ) : (
+            <span className="mono text-xs text-[var(--status-fail)] max-w-xs">
+              {load.msg ?? "Couldn't load the reconstruction mesh."}
+            </span>
+          )}
+        </div>
+      )}
       <div className="absolute pointer-events-none top-3 right-3 mono text-[10px] text-muted-foreground/70 px-2 py-1 rounded-sm bg-background/60 backdrop-blur-sm">
         drag <span className="text-foreground">orbit</span> · shift+drag{" "}
         <span className="text-foreground">pan</span> · wheel{" "}
