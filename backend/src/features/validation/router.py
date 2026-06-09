@@ -62,3 +62,28 @@ def latest_validation(project: ProjectDep, db: DbSession) -> Validation | None:
         .where(Validation.reconstruction_id == recon.id)
         .order_by(Validation.created_at.desc())
     ).first()
+
+
+@router.post("/{project_id}/validate/cancel", response_model=ValidationOut | None)
+def cancel_validation(project: ProjectDep, db: DbSession) -> Validation | None:
+    recon = db.scalars(
+        select(Reconstruction)
+        .where(Reconstruction.project_id == project.id)
+        .order_by(Reconstruction.created_at.desc())
+    ).first()
+    if not recon:
+        return None
+    v = db.scalars(
+        select(Validation)
+        .where(
+            Validation.reconstruction_id == recon.id,
+            Validation.status.in_(["pending", "running"]),
+        )
+        .order_by(Validation.created_at.desc())
+    ).first()
+    if v is None:
+        return None
+    v.status = "cancelled"
+    db.commit()
+    db.refresh(v)
+    return v

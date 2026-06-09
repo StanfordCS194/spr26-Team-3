@@ -32,6 +32,8 @@ async def validate_mesh(ctx: inngest.Context) -> dict:
             v = db.get(Validation, validation_id)
             if v is None:
                 raise RuntimeError(f"validation {validation_id} disappeared")
+            if v.status == "cancelled":
+                return {"validation_id": validation_id, "cancelled": True}
             v.status = "running"
             db.commit()
             recon = db.get(Reconstruction, v.reconstruction_id)
@@ -44,6 +46,8 @@ async def validate_mesh(ctx: inngest.Context) -> dict:
         with SessionLocal() as db:
             v = db.get(Validation, validation_id)
             assert v is not None
+            if v.status == "cancelled":  # cancelled mid-run — discard result
+                return {"validation_id": validation_id, "cancelled": True}
             v.report = report
             v.status = "ok"
             db.commit()

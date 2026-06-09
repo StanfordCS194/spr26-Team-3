@@ -5,7 +5,13 @@ import { useState } from "react";
 import { MetricsChart } from "@/components/MetricsChart";
 import { StatusDot } from "@/components/StatusDot";
 import { StepNav } from "@/components/StepNav";
-import { usePolicies, usePolicyLive, useProjectState, useTrain } from "@/lib/api";
+import {
+  useCancelTraining,
+  usePolicies,
+  usePolicyLive,
+  useProjectState,
+  useTrain,
+} from "@/lib/api";
 
 export const Route = createFileRoute("/p/$projectId/train")({
   component: Train,
@@ -17,6 +23,7 @@ function Train() {
   const { data: state } = useProjectState(projectId);
   const { data: policies = [] } = usePolicies(projectId);
   const train = useTrain(projectId);
+  const cancelTrain = useCancelTraining(projectId);
   const [activePolicyId, setActivePolicyId] = useState<string | null>(null);
   const liveId = activePolicyId ?? policies[0]?.id ?? null;
   const { data: live } = usePolicyLive(projectId, liveId);
@@ -54,7 +61,8 @@ function Train() {
   }
 
   const progress = live?.metrics?.progress ?? 0;
-  const running = live && !live.metrics?.done && !live.metrics?.error;
+  const running =
+    live && !live.metrics?.done && !live.metrics?.error && !live.metrics?.cancelled;
   const trace = live?.metrics?.trace ?? [];
 
   return (
@@ -105,16 +113,27 @@ function Train() {
           </label>
         </section>
 
-        <button
-          disabled={train.isPending || !!running}
-          onClick={async () => {
-            const p = await train.mutateAsync({ total_steps: steps, n_envs: nEnvs, seed });
-            setActivePolicyId(p.id);
-          }}
-          className="px-4 py-2 rounded-sm border-2 border-primary text-primary text-sm font-medium hover:bg-primary/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-        >
-          {running ? "Training…" : "Train PPO"}
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            disabled={train.isPending || !!running}
+            onClick={async () => {
+              const p = await train.mutateAsync({ total_steps: steps, n_envs: nEnvs, seed });
+              setActivePolicyId(p.id);
+            }}
+            className="px-4 py-2 rounded-sm border-2 border-primary text-primary text-sm font-medium hover:bg-primary/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            {running ? "Training…" : "Train PPO"}
+          </button>
+          {running && liveId && (
+            <button
+              onClick={() => cancelTrain.mutate(liveId)}
+              disabled={cancelTrain.isPending}
+              className="px-3 py-2 rounded-sm border border-[var(--status-fail)] text-[var(--status-fail)] text-sm hover:bg-[var(--status-fail)]/10 disabled:opacity-40 transition-colors"
+            >
+              {cancelTrain.isPending ? "Cancelling…" : "Cancel"}
+            </button>
+          )}
+        </div>
 
         {train.error && (
           <p className="mt-3 text-sm text-[var(--status-fail)] mono">
@@ -131,11 +150,19 @@ function Train() {
               <div className="flex items-center gap-4">
                 <StatusDot
                   status={
-                    live.metrics?.error ? "fail" : live.metrics?.done ? "ok" : "warn"
+                    live.metrics?.error
+                      ? "fail"
+                      : live.metrics?.cancelled
+                      ? "idle"
+                      : live.metrics?.done
+                      ? "ok"
+                      : "warn"
                   }
                   label={
                     live.metrics?.error
                       ? "error"
+                      : live.metrics?.cancelled
+                      ? `cancelled · ${(progress * 100).toFixed(0)}%`
                       : live.metrics?.done
                       ? `done · ${live.metrics?.elapsed_s?.toFixed(1)}s`
                       : `${(progress * 100).toFixed(0)}% · ${live.metrics?.fps ?? 0} fps`
