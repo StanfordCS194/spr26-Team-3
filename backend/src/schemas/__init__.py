@@ -81,6 +81,9 @@ class BuildRequest(BaseModel):
     target_diagonal_m: float | None = None
     max_hulls: int | None = None
     up_axis: str = "auto"
+    enclose: bool = True
+    """Wrap the scene in invisible boundary walls so the agent can't leave a
+    partial/open reconstruction."""
 
 
 class Goal3D(BaseModel):
