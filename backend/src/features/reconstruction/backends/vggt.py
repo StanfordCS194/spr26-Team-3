@@ -121,21 +121,16 @@ class VGGTBackend(ReconstructionBackend):
             frame_paths = [frame_paths[i] for i in sorted(set(sel.tolist()))]
 
         progress_cb(0.10, f"uploading {len(frame_paths)} frames to {model_ref}")
-        files = rep.open_files(frame_paths)
-        try:
-            progress_cb(0.20, "running VGGT on Replicate (cloud GPU)")
-            output = rep.run_model(
-                model_ref,
-                {
-                    "inputs": files,
-                    "to_base64": True,
-                    "return_pcd": True,
-                    "pcd_source": "point_head",
-                },
-            )
-        finally:
-            for f in files:
-                f.close()
+        progress_cb(0.20, "running VGGT on Replicate (cloud GPU)")
+        output = rep.run_model(
+            model_ref,
+            {
+                "inputs": list(frame_paths),
+                "to_base64": True,
+                "return_pcd": True,
+                "pcd_source": "point_head",
+            },
+        )
 
         # Output: {"data": [uri per image], "point_cloud": uri}. Each data JSON
         # carries base64 world_points (H,W,3), world_points_conf (H,W), image.

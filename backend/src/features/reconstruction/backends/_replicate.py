@@ -52,19 +52,40 @@ def run_model(model_ref: str, inputs: dict[str, Any]) -> Any:
     """Run a Replicate model to completion and return its output.
 
     Blocks until the prediction finishes (Replicate handles the GPU queue).
-    File-typed inputs may be passed as open binary handles or Paths; the SDK
-    uploads them. Output URIs come back as strings / FileOutput objects.
+    File-typed inputs are passed as `Path`s (or open handles) in `inputs`; they
+    are sent as base64 data URIs. Output URIs come back as strings / FileOutput
+    objects.
+
+    Two non-obvious requirements, both learned from the live API:
+    - A bare `owner/name` ref is pinned to its latest version first: the SDK's
+      model-level prediction endpoint 404s for community models.
+    - `file_encoding_strategy="base64"` is forced. The SDK's default uploads
+      files and passes `api.replicate.com/v1/files/...` URLs, which the model
+      worker can't fetch ("No valid image or video files found"); data URIs work.
     """
-    return _client().run(model_ref, input=inputs)
+    client = _client()
+    return client.run(
+        _pin_version(client, model_ref),
+        input=inputs,
+        file_encoding_strategy="base64",
+    )
 
 
-def open_files(paths: list[Path]) -> list:
-    """Open image/video paths as binary handles for a Replicate file input.
+# Cache latest-version lookups so per-frame callers (depth_fusion) don't
+# re-query the API on every call.
+_version_cache: dict[str, str] = {}
 
-    Caller is responsible for closing them (use within a `with` or close after
-    `run_model` returns). Kept separate so backends control the lifetime.
-    """
-    return [p.open("rb") for p in paths]
+
+def _pin_version(client, model_ref: str) -> str:
+    """Resolve `owner/name` to `owner/name:<latest_version>` (cached)."""
+    if ":" in model_ref:
+        return model_ref
+    if model_ref not in _version_cache:
+        version = client.models.get(model_ref).latest_version
+        if version is None:
+            raise RuntimeError(f"Replicate model {model_ref!r} has no published version")
+        _version_cache[model_ref] = version.id
+    return f"{model_ref}:{_version_cache[model_ref]}"
 
 
 def _uri_str(uri: Any) -> str:
@@ -110,7 +131,6 @@ def decode_array(obj: Any) -> np.ndarray:
 __all__ = [
     "replicate_available",
     "run_model",
-    "open_files",
     "fetch_json",
     "download",
     "decode_array",
