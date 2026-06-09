@@ -24,6 +24,7 @@ function Reconstruct() {
   const { data: latest } = useLatestReconstruction(projectId);
   const reconstruct = useReconstruct(projectId);
   const [picked, setPicked] = useState<string>("depth_fusion");
+  const [depthModel, setDepthModel] = useState<string>("pro");
   const [fov, setFov] = useState<string>("");
 
   const captured = state?.capture.complete ?? false;
@@ -97,6 +98,33 @@ function Reconstruct() {
 
       {picked === "depth_fusion" && (
         <div className="mt-4">
+          <div className="mono text-[11px] uppercase tracking-wider text-muted-foreground mb-2">
+            Depth model
+          </div>
+          <RadioCardGroup
+            name="depth-model"
+            value={depthModel}
+            onValueChange={setDepthModel}
+            disabled={running}
+            options={[
+              {
+                value: "pro",
+                label: "Depth-Pro",
+                tag: "quality",
+                sublabel: "metric + auto-FOV · ~1.9GB, slower first run",
+              },
+              {
+                value: "indoor",
+                label: "Indoor",
+                sublabel: "lighter & faster · uses FOV below",
+              },
+            ]}
+          />
+        </div>
+      )}
+
+      {picked === "depth_fusion" && (
+        <div className="mt-4">
           <label className="mono text-[11px] uppercase tracking-wider text-muted-foreground">
             FOV override (optional)
           </label>
@@ -113,7 +141,7 @@ function Reconstruct() {
               className="w-24 bg-background border border-border rounded-sm px-2 py-1 text-sm mono disabled:opacity-50"
             />
             <span className="text-xs text-muted-foreground">
-              degrees — leave blank to auto-estimate (Depth-Pro)
+              degrees — blank = auto-estimate (Depth-Pro) or 60° (Indoor)
             </span>
           </div>
         </div>
@@ -123,7 +151,9 @@ function Reconstruct() {
         disabled={running || reconstruct.isPending}
         onClick={() => {
           const f = parseFloat(fov);
-          const params = Number.isFinite(f) ? { fov_deg: f } : {};
+          const params: Record<string, unknown> =
+            picked === "depth_fusion" ? { depth_model: depthModel } : {};
+          if (Number.isFinite(f)) params.fov_deg = f;
           reconstruct.mutate({ backend: picked, params });
         }}
         className="mt-6 px-4 py-2 rounded-sm border-2 border-primary text-primary text-sm font-medium hover:bg-primary/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
