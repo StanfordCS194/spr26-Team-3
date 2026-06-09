@@ -11,26 +11,26 @@ import numpy as np
 
 
 def robust_linear_fit(z_ref: np.ndarray, z_new: np.ndarray) -> tuple[float, float]:
-    """Robust linear fit z_ref ≈ k * z_new + c on matched keypoint depths.
+    """Robust scale-only fit z_ref ≈ k * z_new on matched keypoint depths.
 
-    Even with metric depth, per-image monocular depth has scale/offset drift;
-    this corrects new-image depths into the reference frame before pose
-    alignment. Uses Theil–Sen (median of pairwise slopes) — unbiased when an
-    offset is present, robust to outliers. `k` is clamped to [0.5, 2.0]
-    (matthew's heuristic against ill-conditioned matches).
+    Even with metric depth, per-image monocular depth has scale drift; this
+    corrects new-image depths into the reference frame before pose alignment.
+
+    Scale-only (offset c fixed at 0), via the median of per-match depth ratios
+    (z_ref / z_new), `k` clamped to [0.5, 2.0]. This mirrors matthew's prototype
+    (`robustLinearFit` in prototype/v4.2.html): a *free* offset was tried and
+    dropped because it produced extreme values when matched depths had narrow
+    variance. Returns (k, 0.0).
     """
-    from scipy import stats  # local: scipy import is heavyish for module load
-
     z_ref = np.asarray(z_ref, dtype=np.float64).ravel()
     z_new = np.asarray(z_new, dtype=np.float64).ravel()
-    mask = (z_ref > 0.0) & (z_new > 0.0)
+    # Prototype filters at 0.05 (metres) on both sides before taking ratios.
+    mask = (z_ref > 0.05) & (z_new > 0.05)
     if mask.sum() < 4:
         return 1.0, 0.0
-    zr, zn = z_ref[mask], z_new[mask]
-    slope, intercept, _lo, _hi = stats.theilslopes(zr, zn)
-    k = float(np.clip(slope, 0.5, 2.0))
-    c = float(intercept)
-    return k, c
+    ratios = z_ref[mask] / z_new[mask]
+    k = float(np.clip(np.median(ratios), 0.5, 2.0))
+    return k, 0.0
 
 
 def umeyama_rigid(pts_a: np.ndarray, pts_b: np.ndarray) -> np.ndarray:
