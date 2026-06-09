@@ -18,12 +18,17 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    proxy: {
-      "/api": "http://localhost:8000",
-      // /data/* serves per-project artifacts (mesh.ply, frames, thumbnails)
-      // from the backend's StaticFiles mount. Without this, Vite returns the
-      // SPA shell and the PLY loader silently fails.
-      "/data": "http://localhost:8000",
-    },
+    // Proxy target: localhost:8000 for a natively-run API, or http://api:8000
+    // when running in Docker (set VITE_PROXY_TARGET in docker-compose).
+    proxy: (() => {
+      const target = process.env.VITE_PROXY_TARGET || "http://localhost:8000";
+      return {
+        "/api": target,
+        // /data/* serves per-project artifacts (mesh.ply, frames, thumbnails)
+        // from the backend's StaticFiles mount. Without this, Vite returns the
+        // SPA shell and the PLY loader silently fails.
+        "/data": target,
+      };
+    })(),
   },
 });

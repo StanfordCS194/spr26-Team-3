@@ -63,6 +63,9 @@ async def mark_row_failed(ctx: inngest.Context) -> dict:
         row = db.get(Model, row_id)
         if row is None:
             return {"skipped": True, "reason": "row disappeared"}
+        if getattr(row, "status", None) == "cancelled":
+            # User cancelled — don't relabel it as a failure.
+            return {"skipped": True, "reason": "row cancelled"}
         row.status = "failed"
         row.error = (msg or "unknown error")[:1000]
         db.commit()

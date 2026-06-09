@@ -40,6 +40,8 @@ async def build_env(ctx: inngest.Context) -> dict:
             b = db.get(Build, build_id)
             if b is None:
                 raise RuntimeError(f"build {build_id} disappeared")
+            if b.status == "cancelled":
+                return {"build_id": build_id, "cancelled": True}
             b.status = "running"
             db.commit()
             recon = (
@@ -70,6 +72,8 @@ async def build_env(ctx: inngest.Context) -> dict:
         with SessionLocal() as db:
             b = db.get(Build, build_id)
             assert b is not None
+            if b.status == "cancelled":  # cancelled mid-build — discard result
+                return {"build_id": build_id, "cancelled": True}
             b.mjcf_path = str(artifacts.mjcf_path)
             b.n_hulls = artifacts.n_hulls
             b.bounds = {

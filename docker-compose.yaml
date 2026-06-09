@@ -18,17 +18,14 @@ services:
 
   inngest-dev:
     image: inngest/inngest:latest
-    # `host.docker.internal` lets the dev server reach a backend running on
-    # the host (during yarn dev / uv run uvicorn ...). Inside the compose
-    # network, the `api` container resolves to itself, which is preferable
-    # for production-shaped runs — uncomment the second URL there.
+    # Point at the dockerized worker (serves the Inngest functions on :8001)
+    # so a fully-Dockerized stack executes jobs end-to-end. To instead run the
+    # backend natively, swap this for http://host.docker.internal:8000/api/inngest.
     command:
       - inngest
       - dev
       - -u
-      - http://host.docker.internal:8000/api/inngest
-      # - -u
-      # - http://api:8000/api/inngest
+      - http://worker:8001/api/inngest
       - --no-discovery
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -39,10 +36,15 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    command: ["uv", "run", "uvicorn", "src.app:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    # Install the rl_env workspace member into the container's own venv at
+    # startup (the image builds with --no-install-workspace since rl_env isn't
+    # in the backend build context), then run. The anonymous /app/.venv volume
+    # keeps the container's Linux venv isolated from any host .venv.
+    command: ["sh", "-c", "uv sync --frozen --no-dev && uv run uvicorn src.app:app --host 0.0.0.0 --port 8000 --reload"]
     environment:
       DATABASE_URL: postgresql+psycopg://worldscan:worldscan@postgres:5432/worldscan
       INNGEST_DEV_SERVER_URL: http://inngest-dev:8288
+      INNGEST_DEV: http://inngest-dev:8288  # SDK's recognized dev-server var
       DATA_DIR: /data
     ports:
       - "8000:8000"
@@ -51,8 +53,9 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app
-      - ./rl_env:/app/rl_env
+      - ./rl_env:/rl_env  # matches pyproject workspace member ../rl_env (WORKDIR=/app)
       - ./data:/data
+      - backend_api_venv:/app/.venv  # named vol persists across `down` (no full re-sync)
     develop:
       watch:
         - action: sync
@@ -63,10 +66,11 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    command: ["uv", "run", "python", "-m", "src.worker"]
+    command: ["sh", "-c", "uv sync --frozen --no-dev && uv run python -m src.worker"]
     environment:
       DATABASE_URL: postgresql+psycopg://worldscan:worldscan@postgres:5432/worldscan
       INNGEST_DEV_SERVER_URL: http://inngest-dev:8288
+      INNGEST_DEV: http://inngest-dev:8288  # SDK's recognized dev-server var
       DATA_DIR: /data
     depends_on:
       postgres:
@@ -75,8 +79,9 @@ services:
         condition: service_started
     volumes:
       - ./backend:/app
-      - ./rl_env:/app/rl_env
+      - ./rl_env:/rl_env  # matches pyproject workspace member ../rl_env (WORKDIR=/app)
       - ./data:/data
+      - backend_worker_venv:/app/.venv  # named vol persists across `down` (no full re-sync)
     develop:
       watch:
         - action: sync
@@ -84,20 +89,27 @@ services:
           target: /app/src
 
   frontend:
+    # Monorepo build: context is the repo root so the workspace install sees
+    # root package.json/yarn.lock + the `shared` workspace.
     build:
-      context: ./frontend
-      dockerfile: Dockerfile.dev
+      context: .
+      dockerfile: frontend/Dockerfile.dev
     command: ["yarn", "dev", "--host", "0.0.0.0"]
     ports:
       - "5173:5173"
     environment:
-      VITE_API_URL: http://localhost:8000
-      VITE_INNGEST_URL: http://localhost:8288
+      # Vite proxies /api and /data to the api container (not host localhost).
+      VITE_PROXY_TARGET: http://api:8000
+    depends_on:
+      - api
     volumes:
-      - ./frontend:/app
-      - ./shared:/shared
-      - frontend_node_modules:/app/node_modules
+      - ./frontend:/repo/frontend
+      - ./shared:/repo/shared
+      - frontend_node_modules:/repo/node_modules  # hoisted workspace node_modules
+      - /repo/frontend/node_modules               # anonymous: frontend-local nm
 
 volumes:
   pgdata:
   frontend_node_modules:
+  backend_api_venv:
+  backend_worker_venv:

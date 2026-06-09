@@ -50,6 +50,8 @@ class ProgressCB(BaseCallback):
             p = db.get(Policy, self.policy_id)
             if p is None:
                 return False
+            if (p.metrics or {}).get("cancelled"):
+                return False  # user hit Cancel — stop training here
             p.metrics = {
                 **(p.metrics or {}),
                 "progress": min(1.0, self.num_timesteps / max(self.total, 1)),
@@ -102,13 +104,18 @@ def run_training(policy_id: str, mjcf_path: str, total_steps: int, n_envs: int, 
         with SessionLocal() as db:
             p = db.get(Policy, policy_id)
             assert p is not None
-            p.ckpt_path = str(ckpt_path)
-            p.metrics = {
-                **(p.metrics or {}),
-                "progress": 1.0,
-                "elapsed_s": round(elapsed, 2),
-                "done": True,
-            }
+            p.ckpt_path = str(ckpt_path)  # keep the partial checkpoint either way
+            m = p.metrics or {}
+            if m.get("cancelled"):
+                # Stopped early by the user — mark cancelled, not done.
+                p.metrics = {**m, "elapsed_s": round(elapsed, 2), "cancelled": True}
+            else:
+                p.metrics = {
+                    **m,
+                    "progress": 1.0,
+                    "elapsed_s": round(elapsed, 2),
+                    "done": True,
+                }
             db.commit()
     except Exception as exc:
         traceback.print_exc()

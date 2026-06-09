@@ -6,6 +6,7 @@ import { ProjectSceneLayout } from "@/components/ProjectSceneLayout";
 import { StatusDot } from "@/components/StatusDot";
 import { ValidationReport, type Report } from "@/components/ValidationReport";
 import {
+  useCancelValidation,
   useLatestReconstruction,
   useLatestValidation,
   useProjectState,
@@ -23,6 +24,7 @@ function Validate() {
   const { data: recon } = useLatestReconstruction(projectId);
   const { data: latest } = useLatestValidation(projectId);
   const validate = useValidate(projectId);
+  const cancel = useCancelValidation(projectId);
   const [override, setOverride] = useState(false);
 
   const reconReady = recon?.status === "ok";
@@ -69,19 +71,30 @@ function Validate() {
         </p>
       </header>
 
-      <button
-        disabled={validate.isPending || running}
-        onClick={() => validate.mutate()}
-        className="mt-6 px-4 py-2 rounded-sm border-2 border-primary text-primary text-sm font-medium hover:bg-primary/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-      >
-        {running
-          ? "Validating…"
-          : validate.isPending
-          ? "Queuing…"
-          : latest
-          ? "Re-validate"
-          : "Run validation"}
-      </button>
+      <div className="mt-6 flex items-center gap-3">
+        <button
+          disabled={validate.isPending || running}
+          onClick={() => validate.mutate()}
+          className="px-4 py-2 rounded-sm border-2 border-primary text-primary text-sm font-medium hover:bg-primary/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+        >
+          {running
+            ? "Validating…"
+            : validate.isPending
+            ? "Queuing…"
+            : latest
+            ? "Re-validate"
+            : "Run validation"}
+        </button>
+        {running && (
+          <button
+            onClick={() => cancel.mutate()}
+            disabled={cancel.isPending}
+            className="px-3 py-2 rounded-sm border border-[var(--status-fail)] text-[var(--status-fail)] text-sm hover:bg-[var(--status-fail)]/10 disabled:opacity-40 transition-colors"
+          >
+            {cancel.isPending ? "Cancelling…" : "Cancel"}
+          </button>
+        )}
+      </div>
 
       {validate.error && (
         <p className="mt-3 text-sm text-[var(--status-fail)] mono">
