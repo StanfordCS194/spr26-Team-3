@@ -11,26 +11,26 @@ import numpy as np
 
 
 def robust_linear_fit(z_ref: np.ndarray, z_new: np.ndarray) -> tuple[float, float]:
-    """Robust linear fit z_ref ≈ k * z_new + c on matched keypoint depths.
+    """Robust scale-only fit z_ref ≈ k * z_new on matched keypoint depths.
 
-    Even with metric depth, per-image monocular depth has scale/offset drift;
-    this corrects new-image depths into the reference frame before pose
-    alignment. Uses Theil–Sen (median of pairwise slopes) — unbiased when an
-    offset is present, robust to outliers. `k` is clamped to [0.5, 2.0]
-    (matthew's heuristic against ill-conditioned matches).
+    Even with metric depth, per-image monocular depth has scale drift; this
+    corrects new-image depths into the reference frame before pose alignment.
+
+    Scale-only (offset c fixed at 0), via the median of per-match depth ratios
+    (z_ref / z_new), `k` clamped to [0.5, 2.0]. This mirrors matthew's prototype
+    (`robustLinearFit` in prototype/v4.2.html): a *free* offset was tried and
+    dropped because it produced extreme values when matched depths had narrow
+    variance. Returns (k, 0.0).
     """
-    from scipy import stats  # local: scipy import is heavyish for module load
-
     z_ref = np.asarray(z_ref, dtype=np.float64).ravel()
     z_new = np.asarray(z_new, dtype=np.float64).ravel()
-    mask = (z_ref > 0.0) & (z_new > 0.0)
+    # Prototype filters at 0.05 (metres) on both sides before taking ratios.
+    mask = (z_ref > 0.05) & (z_new > 0.05)
     if mask.sum() < 4:
         return 1.0, 0.0
-    zr, zn = z_ref[mask], z_new[mask]
-    slope, intercept, _lo, _hi = stats.theilslopes(zr, zn)
-    k = float(np.clip(slope, 0.5, 2.0))
-    c = float(intercept)
-    return k, c
+    ratios = z_ref[mask] / z_new[mask]
+    k = float(np.clip(np.median(ratios), 0.5, 2.0))
+    return k, 0.0
 
 
 def umeyama_rigid(pts_a: np.ndarray, pts_b: np.ndarray) -> np.ndarray:
@@ -110,20 +110,12 @@ def back_project(
     intrinsics: np.ndarray,
     world_transform: np.ndarray | None = None,
     discontinuity_m: float = 0.3,
-    stride: int = 1,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Lift a depth grid to a colored triangle mesh.
 
     Returns (vertices Nx3, faces Mx3, colors Nx3 uint8). Faces are skipped at
     depth discontinuities (>= discontinuity_m between adjacent pixels) to
     avoid stretched ghost geometry around object edges.
-
-    `stride` subsamples the depth grid (every `stride`-th pixel in u and v)
-    before triangulation, cutting vertex count by ~stride². Sampled pixels keep
-    their TRUE pixel coordinates so `intrinsics` stays valid — a full-res
-    1080×1920 frame at stride=1 is ~2M verts/frame, unusable once concatenated
-    across a scan; callers pass a stride that caps the grid to a viewer-loadable
-    size.
 
     Coordinate convention: camera looks down +Z; X right, Y down (OpenCV).
     `intrinsics` is a 3x3 K matrix. If `world_transform` (4x4) is given,
@@ -135,24 +127,12 @@ def back_project(
         raise ValueError(f"color must be HxWx3, got {color.shape}")
     if color.shape[:2] != depth.shape:
         raise ValueError(f"color {color.shape[:2]} != depth {depth.shape}")
-    if stride < 1:
-        raise ValueError(f"stride must be >= 1, got {stride}")
 
+    H, W = depth.shape
     fx, fy = intrinsics[0, 0], intrinsics[1, 1]
     cx, cy = intrinsics[0, 2], intrinsics[1, 2]
 
-    if stride > 1:
-        u_idx = np.arange(0, depth.shape[1], stride)
-        v_idx = np.arange(0, depth.shape[0], stride)
-        depth = depth[np.ix_(v_idx, u_idx)]
-        color = color[np.ix_(v_idx, u_idx)]
-        us, vs = np.meshgrid(u_idx.astype(np.float64), v_idx.astype(np.float64))
-    else:
-        us, vs = np.meshgrid(
-            np.arange(depth.shape[1], dtype=np.float64),
-            np.arange(depth.shape[0], dtype=np.float64),
-        )
-    H, W = depth.shape
+    us, vs = np.meshgrid(np.arange(W, dtype=np.float64), np.arange(H, dtype=np.float64))
     z = depth.astype(np.float64)
     x = (us - cx) * z / fx
     y = (vs - cy) * z / fy

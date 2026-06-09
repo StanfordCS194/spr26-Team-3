@@ -1,42 +1,33 @@
-"""Model loaders + inference for depth-fusion.
+"""Model loaders + inference for depth-fusion. Lazy, process-cached.
 
-Monocular metric depth runs LOCALLY by default — Matthew's Depth-Anything-V2
-(or Depth-Pro) pipeline, reused via `rl_env.server` so the legacy Flask
-`/api/depth` and this backend share weights. These models are small (~95MB)
-and run fine on a laptop CPU/MPS — unlike VGGT, they never crashed anything.
-
-A cloud depth path (`name="cloud"`, Replicate Depth-Anything-V3-metric) is kept
-as an option, but it costs one prediction PER FRAME, so it rate-limits hard on
-low-credit accounts. Local is the default. SuperPoint + LightGlue stay local
-(tiny ONNX, CPU).
+Depth uses transformers (Depth-Anything-V2-Metric-Indoor-Small by default,
+Apple Depth-Pro optional). Feature extraction + matching uses SuperPoint and
+LightGlue ONNX models, downloaded from the same URLs matthew's prototype
+uses so the legacy Flask server and the new backend share weights.
 """
 from __future__ import annotations
 
 import subprocess
-import tempfile
 import threading
 from pathlib import Path
 
 import numpy as np
 from PIL import Image
 
-from src.config import get_settings
-from src.features.reconstruction.backends import _replicate as rep
+# rl_env is a workspace member of the backend (see backend/pyproject.toml).
+# Imports of `rl_env.server` are deferred to call sites because that module
+# pulls in flask at import time, which is only needed for matthew's legacy
+# server, not for backend tests of pure-math helpers.
 
-# Process-wide caches, guarded so concurrent Inngest workers don't double-load.
+# Process-wide caches (matches matthew's `_depth_cache` pattern). Guarded by
+# locks so concurrent Inngest workers don't double-load.
 _depth_lock = threading.Lock()
 _onnx_lock = threading.Lock()
-_onnx_sessions: dict[str, object] = {}
-
-# Replicate's depth-anything-v3-metric returns a "depth" array that must be
-# scaled to true meters: metric_depth = focal_px * depth / 300 (per the model
-# README). focal_px is derived from image width + FOV, matching the K that
-# depth_fusion builds with `assume_intrinsics`.
-_METRIC_DEPTH_DIVISOR = 300.0
+_onnx_sessions: dict[str, "object"] = {}
 
 
 def get_depth_model(name: str = "indoor"):
-    """Return matthew's lazily-loaded local depth pipeline (`indoor` or `pro`).
+    """Return matthew's lazily-loaded depth pipeline (`indoor` or `pro`).
 
     Wraps `rl_env.server._ensure_depth_model` so the legacy Flask `/api/depth`
     endpoint and this backend share the same in-memory weights.
@@ -46,17 +37,13 @@ def get_depth_model(name: str = "indoor"):
         return _ensure_depth_model(name)
 
 
-def infer_depth(
-    image: Image.Image, name: str = "indoor", fov_deg: float = 60.0
-) -> tuple[np.ndarray, dict]:
-    """Run metric depth on a PIL image; return (depth_meters HxW, meta).
+def infer_depth(image: Image.Image, name: str = "indoor") -> tuple[np.ndarray, dict]:
+    """Run depth inference on a PIL image; return (depth_meters HxW float32, meta).
 
-    Default is Matthew's LOCAL model (`name` = "indoor"/"pro"). Pass
-    `name="cloud"` to use Replicate's Depth-Anything-V3-metric instead.
+    Meta carries the model name, output shape, and optional FOV (Depth-Pro only).
+    Mirrors matthew's `rl_env.server.api_depth` handling so outputs match the
+    legacy Flask endpoint exactly.
     """
-    if name == "cloud":
-        return _infer_depth_cloud(image, fov_deg)
-
     handle = get_depth_model(name)
     meta: dict = {"depth_model": name}
     if handle["kind"] == "pipeline":
@@ -86,54 +73,6 @@ def infer_depth(
         depth = depth.squeeze(0)
     meta["depth_shape"] = list(depth.shape)
     return depth, meta
-
-
-def _pick_depth_array(payload: dict) -> np.ndarray:
-    """Extract the 2D depth grid from a Replicate depth model's JSON output.
-
-    Prefers an explicit depth-like key, else falls back to the first entry that
-    decodes to a 2D array, so we tolerate minor schema differences.
-    """
-    for key in ("depth", "metric_depth", "predicted_depth", "depth_map"):
-        if key in payload:
-            return rep.decode_array(payload[key])
-    for value in payload.values():
-        try:
-            arr = rep.decode_array(value)
-        except Exception:
-            continue
-        if arr.ndim == 2:
-            return arr
-    raise RuntimeError(f"no depth array in Replicate output keys: {list(payload)}")
-
-
-def _infer_depth_cloud(image: Image.Image, fov_deg: float) -> tuple[np.ndarray, dict]:
-    """Cloud depth via Replicate (one prediction per frame — rate-limits)."""
-    settings = get_settings()
-    model_ref = settings.replicate_depth_model
-    with tempfile.NamedTemporaryFile(suffix=".png", delete=True) as tmp:
-        image.save(tmp.name, format="PNG")
-        with open(tmp.name, "rb") as fh:
-            output = rep.run_model(
-                model_ref,
-                {"images": [fh], "to_base64": True, "return_depth": True,
-                 "output_format": "json"},
-            )
-    data_uris = output.get("data") if isinstance(output, dict) else None
-    if not data_uris:
-        raise RuntimeError(f"depth model (Replicate) returned no data: {output!r}")
-    raw = _pick_depth_array(rep.fetch_json(data_uris[0])).astype(np.float32)
-    while raw.ndim > 2:
-        raw = raw.squeeze(0)
-    # Scale to metric meters using the focal implied by image width + FOV.
-    focal_px = image.width / (2.0 * np.tan(np.radians(fov_deg) / 2.0))
-    depth = (raw * focal_px / _METRIC_DEPTH_DIVISOR).astype(np.float32)
-    return depth, {
-        "depth_model": model_ref,
-        "depth_shape": list(depth.shape),
-        "focal_px": float(focal_px),
-        "metric_scale": float(focal_px / _METRIC_DEPTH_DIVISOR),
-    }
 
 
 def _models_cache_dir() -> Path:
@@ -181,21 +120,27 @@ def _onnx_session(name: str):
         return sess
 
 
-def _preprocess_for_superpoint(image: Image.Image, max_side: int = 512) -> tuple[np.ndarray, float]:
-    """Grayscale + resize-down to keep the longer side ≤ max_side. Returns
-    (image_array float32 0-1, scale_factor) so detected keypoints can be
-    mapped back to original coordinates.
+def _preprocess_for_superpoint(image: Image.Image, max_side: int = 1536) -> tuple[np.ndarray, float, float]:
+    """Grayscale + resize so the longer side ≤ max_side, with both dims
+    quantized to a multiple of 8 (SuperPoint's ONNX export expects /8-divisible
+    spatial dims, and the prototype found coarser inputs lose keypoints).
+
+    Returns (image_array float32 0-1 shaped (1,1,H,W), scale_x, scale_y) so
+    detected keypoints in the resized grid can be mapped back to original pixel
+    coordinates. Mirrors `preprocessForSuperPoint` in prototype/v4.2.html
+    (SP_MAX_DIM=1536, round to multiple of 8, min 32).
     """
     w, h = image.size
     scale = min(1.0, float(max_side) / float(max(w, h)))
-    if scale < 1.0:
-        new_w, new_h = int(round(w * scale)), int(round(h * scale))
+    new_w = max(32, int(round(w * scale / 8.0)) * 8)
+    new_h = max(32, int(round(h * scale / 8.0)) * 8)
+    if (new_w, new_h) != (w, h):
         image = image.resize((new_w, new_h), Image.BILINEAR)
     gray = image.convert("L")
     arr = np.asarray(gray, dtype=np.float32) / 255.0
     # SuperPoint expects (1, 1, H, W).
     arr = arr[None, None, :, :]
-    return arr, scale
+    return arr, new_w / float(w), new_h / float(h)
 
 
 def extract_superpoint(image: Image.Image, max_keypoints: int = 1024) -> dict:
@@ -205,7 +150,7 @@ def extract_superpoint(image: Image.Image, max_keypoints: int = 1024) -> dict:
     Caps to top-`max_keypoints` by score, matching matthew's heuristic.
     """
     sess = _onnx_session("superpoint")
-    arr, scale = _preprocess_for_superpoint(image)
+    arr, scale_x, scale_y = _preprocess_for_superpoint(image)
     inputs = {sess.get_inputs()[0].name: arr}
     out_names = [o.name for o in sess.get_outputs()]
     outs = sess.run(out_names, inputs)
@@ -217,9 +162,12 @@ def extract_superpoint(image: Image.Image, max_keypoints: int = 1024) -> dict:
     if kp.shape[0] > max_keypoints:
         top = np.argsort(scores)[-max_keypoints:]
         kp, scores, desc = kp[top], scores[top], desc[top]
-    if scale < 1.0:
-        kp = kp.astype(np.float32) / scale
-    return {"keypoints": kp.astype(np.float32), "descriptors": desc.astype(np.float32), "scores": scores.astype(np.float32)}
+    # Map keypoints from the (independently quantized) resized grid back to
+    # original pixel coordinates. x and y can have slightly different scales.
+    kp = kp.astype(np.float32)
+    kp[:, 0] /= scale_x
+    kp[:, 1] /= scale_y
+    return {"keypoints": kp, "descriptors": desc.astype(np.float32), "scores": scores.astype(np.float32)}
 
 
 def match_lightglue(feat_a: dict, feat_b: dict, image_size: tuple[int, int]) -> np.ndarray:
@@ -249,17 +197,20 @@ def match_lightglue(feat_a: dict, feat_b: dict, image_size: tuple[int, int]) -> 
     expected = {i.name for i in sess.get_inputs()}
     inputs = {k: v for k, v in inputs.items() if k in expected}
     out_names = [o.name for o in sess.get_outputs()]
-    outs = sess.run(out_names, inputs)
-    matches0 = outs[0]
-    # fabio-sim's LightGlue-ONNX export emits `matches0` as a per-keypoint
-    # assignment vector of shape (1, N0): entry k is the index of kpts0[k]'s
-    # match in kpts1, or -1 if unmatched. Convert to (M, 2) (idx_a, idx_b) pairs.
-    if matches0.ndim == 3 and matches0.shape[-1] == 2:
-        # Some exports already give (1, M, 2) index pairs — pass through.
-        return matches0[0].astype(np.int64)
-    assignment = matches0[0] if matches0.ndim == 2 else matches0
-    idx_a = np.nonzero(assignment >= 0)[0]
-    idx_b = assignment[idx_a]
+    outs = dict(zip(out_names, sess.run(out_names, inputs)))
+    # The fabio-sim superpoint_lightglue ONNX returns `matches0` of shape
+    # (1, num_keypoints_a): for each keypoint in image A, the index of its
+    # matched keypoint in image B, or -1 if unmatched (LightGlue's learned
+    # threshold already filters weak matches). Convert that assignment array to
+    # explicit (idx_a, idx_b) pairs.
+    m0 = outs.get("matches0", next(iter(outs.values())))
+    m0 = np.asarray(m0)
+    while m0.ndim > 1:
+        m0 = m0[0]
+    idx_a = np.nonzero(m0 > -1)[0]
+    idx_b = m0[idx_a]
+    if idx_a.size == 0:
+        return np.zeros((0, 2), dtype=np.int64)
     return np.stack([idx_a, idx_b], axis=1).astype(np.int64)
 
 
