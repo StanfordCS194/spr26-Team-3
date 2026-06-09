@@ -197,7 +197,8 @@ function Reconstruct() {
           )}
           {running && (
             <p className="text-xs text-muted-foreground mono">
-              Running on Inngest · live polling
+              Working on it — this can take a minute or two. The 3D scene shows
+              on the right when it's ready; this page updates on its own.
             </p>
           )}
           {latest.status === "ok" && (
