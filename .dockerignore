@@ -1,0 +1,14 @@
+# Keep the frontend monorepo build context (context: .) small.
+# (The backend/api/worker builds use ./backend as their own context.)
+**/node_modules
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache
+**/.git
+.gstack/
+data/
+backend/
+rl_env/
+*.log
