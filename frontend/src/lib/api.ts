@@ -272,6 +272,23 @@ export const useReconstruct = (projectId: string) => {
   });
 };
 
+export const useApplyReconstructionTransform = (projectId: string) => {
+  const qc = useQueryClient();
+  return useMutation({
+    // `matrix` is the viewer's 4x4 placement (column-major, THREE.Matrix4.elements).
+    mutationFn: (matrix: number[]) =>
+      send<Reconstruction>(
+        `/api/projects/${projectId}/reconstruction/transform`,
+        "POST",
+        { matrix },
+      ),
+    onSuccess: (updated) => {
+      qc.setQueryData(["reconstruction", projectId], updated);
+      qc.invalidateQueries({ queryKey: ["reconstruction", projectId] });
+    },
+  });
+};
+
 export const useLatestReconstruction = (projectId: string) => {
   const qc = useQueryClient();
   return useQuery({
