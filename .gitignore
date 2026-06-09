@@ -49,3 +49,6 @@ shared/ts/api.d.ts
 .env
 .env.local
 .env.*.local
+
+# local host-mode SQLite database
+backend/*.db

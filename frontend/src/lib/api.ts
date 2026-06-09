@@ -424,12 +424,21 @@ export const useTrain = (projectId: string) => {
   });
 };
 
-export type TrajectoryPoint = { step: number; x: number; y: number; collision: boolean };
+export type TrajectoryPoint = {
+  step: number;
+  x: number;
+  y: number;
+  collision: boolean;
+  near?: boolean;
+};
 export type TrajectoryEpisode = ReplayEpisode & {
   failure_class: "success" | "timeout" | "stuck" | "collided" | "near-miss";
   spawn: number[];
   goal: number[];
   trajectory: TrajectoryPoint[] | null;
+  avoided?: number;
+  avoid_points?: { x: number; y: number }[];
+  collisions?: number;
 };
 export type TrajectoryReplayResponse = Omit<ReplayResponse, "episodes"> & {
   bounds: { min: number[]; max: number[] };
@@ -463,6 +472,33 @@ export const useStartReplay = (projectId: string) => {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["runs", projectId] }),
   });
 };
+
+export type CompareEpisode = {
+  policy: string;
+  steps: number;
+  success: boolean;
+  distance: number;
+  collisions: number;
+  avoided: number;
+  spawn: number[];
+  goal: number[];
+  trajectory: TrajectoryPoint[];
+};
+export type CompareResponse = {
+  seed: number;
+  bounds: { min: number[]; max: number[] };
+  spawn_region: { xmin: number; xmax: number; ymin: number; ymax: number };
+  results: CompareEpisode[];
+  raw_to_sim?: number[][] | null;
+  floor_z?: number;
+};
+
+// Run greedy + the trained PPO on the SAME start→goal, head-to-head.
+export const useComparePolicies = (projectId: string) =>
+  useMutation({
+    mutationFn: (body: { seed?: number; max_steps?: number }) =>
+      send<CompareResponse>(`/api/projects/${projectId}/compare`, "POST", body),
+  });
 
 export const useRun = (projectId: string, runId: string | null | undefined) => {
   const qc = useQueryClient();

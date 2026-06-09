@@ -18,9 +18,12 @@ from src.db import SessionLocal
 from src.models import Policy
 
 
-def _make_env_fn(mjcf_path: str, max_steps: int, seed: int):
+def _make_env_fn(mjcf_path: str, max_steps: int, seed: int, spawn_cells: list | None = None):
     def _t():
-        return NavEnv(mjcf_path, task=TaskConfig(max_steps=max_steps, seed=seed))
+        return NavEnv(
+            mjcf_path,
+            task=TaskConfig(max_steps=max_steps, seed=seed, spawn_cells=spawn_cells),
+        )
     return _t
 
 
@@ -62,7 +65,8 @@ class ProgressCB(BaseCallback):
         return True
 
 
-def run_training(policy_id: str, mjcf_path: str, total_steps: int, n_envs: int, max_steps: int, seed: int) -> None:
+def run_training(policy_id: str, mjcf_path: str, total_steps: int, n_envs: int, max_steps: int, seed: int,
+                 spawn_cells: list | None = None) -> None:
     try:
         with SessionLocal() as db:
             p = db.get(Policy, policy_id)
@@ -70,7 +74,7 @@ def run_training(policy_id: str, mjcf_path: str, total_steps: int, n_envs: int, 
             p.metrics = {"progress": 0.0, "steps": 0, "started_at": time.time()}
             db.commit()
 
-        vec = DummyVecEnv([_make_env_fn(mjcf_path, max_steps, seed + i) for i in range(n_envs)])
+        vec = DummyVecEnv([_make_env_fn(mjcf_path, max_steps, seed + i, spawn_cells) for i in range(n_envs)])
         model = PPO(
             "MlpPolicy",
             vec,

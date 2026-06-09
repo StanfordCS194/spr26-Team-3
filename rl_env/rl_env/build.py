@@ -60,6 +60,9 @@ class BuildArtifacts:
     floor_z: float
     spawn_region: tuple[float, float, float, float]  # xmin, xmax, ymin, ymax
     materials: dict[str, dict] = field(default_factory=dict)
+    # 4x4 raw-mesh -> sim/MJCF transform (rotate up-axis, center+ground, scale).
+    # Lets viewers map sim-frame trajectories back onto the raw textured mesh.
+    raw_to_sim: np.ndarray | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -68,11 +71,36 @@ class BuildArtifacts:
 
 
 def _detect_up_axis(mesh: trimesh.Trimesh) -> str:
-    """Heuristic: the up axis is whichever has the largest vertical-extent / horizontal-extent ratio.
+    """Find the vertical axis of a room-like mesh.
 
-    For room-like meshes this is unreliable, so callers should override when known.
-    Falls back to 'y' (most photo-depth pipelines).
+    A real floor (and usually a ceiling) is a dense, flat plane sitting at one
+    extreme of the vertical axis; walls are not. So the vertical axis is the one
+    whose extreme planes hold the largest fraction of vertices. This is far more
+    reliable than comparing bounding-box extents (a room is often wider/longer
+    than it is tall, which fooled the old extent heuristic into picking a
+    horizontal axis as "up").
+
+    Falls back to the extent heuristic when the floor signal is weak/ambiguous
+    (e.g. a closed synthetic box with uniform vertex density).
     """
+    v = np.asarray(mesh.vertices)
+
+    def floor_conc(ax: int) -> float:
+        lo, hi = float(v[:, ax].min()), float(v[:, ax].max())
+        span = hi - lo
+        if span < 1e-6:
+            return 0.0
+        near_lo = float(np.mean(v[:, ax] < lo + 0.08 * span))
+        near_hi = float(np.mean(v[:, ax] > hi - 0.08 * span))
+        return max(near_lo, near_hi)
+
+    cy, cz = floor_conc(1), floor_conc(2)
+    # One axis clearly dominating the other is the signal — partial scans may
+    # only put ~15-20% of vertices in the floor slab, so judge by ratio, not by
+    # an absolute cutoff.
+    if max(cy, cz) >= 0.10 and max(cy, cz) > 1.5 * min(cy, cz):
+        return "y" if cy > cz else "z"
+
     extents = mesh.extents
     if extents[2] > extents[1] * 1.2 and extents[2] > extents[0] * 0.5:
         return "z"
@@ -90,25 +118,41 @@ def _to_z_up(mesh: trimesh.Trimesh, up_axis: str) -> trimesh.Trimesh:
     raise ValueError(f"unknown up axis: {up_axis}")
 
 
-def preprocess(mesh: trimesh.Trimesh, cfg: BuildConfig) -> tuple[trimesh.Trimesh, float]:
-    """Return (mesh in MuJoCo Z-up coords, floor_z)."""
+def preprocess(mesh: trimesh.Trimesh, cfg: BuildConfig) -> tuple[trimesh.Trimesh, float, np.ndarray]:
+    """Return (mesh in MuJoCo Z-up coords, floor_z, raw_to_sim 4x4).
+
+    raw_to_sim maps a point in the original mesh's coordinates to the
+    sim/MJCF frame, composed as scale @ translate @ rotate.
+    """
     up = cfg.up_axis if cfg.up_axis != "auto" else _detect_up_axis(mesh)
-    mesh = _to_z_up(mesh, up)
+    if up == "y":
+        R = trimesh.transformations.rotation_matrix(np.pi / 2, [1, 0, 0])
+    elif up == "z":
+        R = np.eye(4)
+    else:
+        raise ValueError(f"unknown up axis: {up}")
+    mesh = mesh.copy()
+    mesh.apply_transform(R)
 
     mins = mesh.bounds[0]
     maxs = mesh.bounds[1]
     center_xy = (mins[:2] + maxs[:2]) / 2
-    mesh.apply_translation((-center_xy[0], -center_xy[1], -mins[2]))
+    tvec = np.array([-center_xy[0], -center_xy[1], -mins[2]], dtype=float)
+    Tm = trimesh.transformations.translation_matrix(tvec)
+    mesh.apply_translation(tvec)
 
+    Sm = np.eye(4)
     if cfg.target_diagonal_m is not None:
         ext = mesh.extents
         diag_xy = float(np.hypot(ext[0], ext[1]))
         if diag_xy > 1e-6:
             scale = cfg.target_diagonal_m / diag_xy
+            Sm = trimesh.transformations.scale_matrix(scale)
             mesh.apply_scale(scale)
 
     floor_z = float(mesh.bounds[0][2])
-    return mesh, floor_z
+    raw_to_sim = Sm @ Tm @ R  # apply R first, then T, then S
+    return mesh, floor_z, raw_to_sim
 
 
 # ---------------------------------------------------------------------------
@@ -116,23 +160,131 @@ def preprocess(mesh: trimesh.Trimesh, cfg: BuildConfig) -> tuple[trimesh.Trimesh
 # ---------------------------------------------------------------------------
 
 
+# A reconstruction mesh can be millions of faces; coarse collision geometry
+# doesn't need that, and the heavy ops below choke on it. Decimate first.
+_COLLISION_MAX_FACES = 120_000
+
+
+def _decimate_for_collision(mesh: trimesh.Trimesh, max_faces: int = _COLLISION_MAX_FACES) -> trimesh.Trimesh:
+    """Best-effort reduce face count before decomposition. If no decimation
+    backend is available, return the mesh unchanged — the component fallback
+    below is memory-safe either way."""
+    if len(mesh.faces) <= max_faces:
+        return mesh
+    try:
+        out = mesh.simplify_quadric_decimation(face_count=max_faces)
+        if out is not None and len(out.faces) > 0:
+            return out
+    except Exception:
+        pass
+    return mesh
+
+
+def _largest_components(mesh: trimesh.Trimesh, k: int) -> list[trimesh.Trimesh]:
+    """Up to `k` largest connected components, materialised one at a time.
+
+    Avoids `mesh.split()` — which builds a full Trimesh for *every* component,
+    OOMing on a back-projected mesh with thousands of tiny noise islands. We
+    label components cheaply (face adjacency) and only copy out the biggest few.
+    """
+    nf = len(mesh.faces)
+    if nf == 0:
+        return [mesh]
+    try:
+        from trimesh.graph import connected_components
+
+        comps = connected_components(mesh.face_adjacency, min_len=1, nodes=np.arange(nf))
+    except Exception:
+        return [mesh]
+    comps = sorted(comps, key=len, reverse=True)[: max(k, 1)]
+    out: list[trimesh.Trimesh] = []
+    for fi in comps:
+        try:
+            out.append(mesh.submesh([fi], append=True, repair=False))
+        except Exception:
+            pass
+    return out or [mesh]
+
+
+def _real_floor_z(mesh: trimesh.Trimesh) -> float:
+    """The visible floor height: the densest z-slab in the lower 40% of the
+    height range. Phone scans have noise *below* the real floor, so the mesh
+    minimum sits under the surface the robot should roll on."""
+    zs = np.asarray(mesh.vertices)[:, 2]
+    hist, edges = np.histogram(zs, bins=80)
+    i = int(np.argmax(hist[: max(1, int(80 * 0.4))]))
+    return float((edges[i] + edges[i + 1]) / 2)
+
+
+def _occupancy_columns(
+    mesh: trimesh.Trimesh,
+    floor_z: float,
+    cell: float = 0.17,
+    band_lo: float = 0.14,
+    band_hi: float = 1.4,
+    max_boxes: int = 700,
+) -> list[tuple[float, float, float, float, float, float]]:
+    """2.5D costmap collision: one box column per XY cell that contains mesh
+    points in the obstacle band above the floor (walls, furniture).
+
+    Convex hulls of a curved scan shell each wrap huge swaths of *free* space —
+    the agent ends up "in collision" everywhere and lidar sees phantom walls.
+    Box columns hug the actual geometry instead. Returns (cx, cy, hx, hy, z0, z1).
+    """
+    v = np.asarray(mesh.vertices)
+    zs = v[:, 2]
+    pts = v[(zs > floor_z + band_lo) & (zs < floor_z + band_hi)]
+    if not len(pts):
+        return []
+    while True:
+        origin = pts[:, :2].min(axis=0)
+        ij = np.floor((pts[:, :2] - origin) / cell).astype(int)
+        from collections import defaultdict
+
+        zmax: dict[tuple[int, int], float] = defaultdict(float)
+        count: dict[tuple[int, int], int] = defaultdict(int)
+        for (i, j), z in zip(map(tuple, ij), pts[:, 2]):
+            count[(i, j)] += 1
+            zmax[(i, j)] = max(zmax[(i, j)], z - floor_z)
+        thr = max(4, int(np.percentile(np.array(list(count.values())), 30) * 0.4))
+        cells = [c for c, n in count.items() if n >= thr]
+        if len(cells) <= max_boxes:
+            break
+        cell *= 1.4  # too fine for this scan — coarsen and retry
+    half = cell * 0.55  # slight overlap so diagonal gaps don't leak
+    out = []
+    for c in cells:
+        h = max(0.12, float(zmax[c]) / 2)
+        out.append((
+            float(origin[0] + (c[0] + 0.5) * cell),
+            float(origin[1] + (c[1] + 0.5) * cell),
+            half, half,
+            floor_z, floor_z + 2 * h,
+        ))
+    return out
+
+
 def decompose(mesh: trimesh.Trimesh, cfg: BuildConfig) -> list[trimesh.Trimesh]:
     """Return a list of convex hull meshes covering `mesh`.
 
     Strategy:
-      1. If trimesh has a working VHACD/CoACD backend, use it.
-      2. Else split into connected components and take convex hull of each.
-      3. If that yields too few hulls (e.g. one big merged mesh), fall back to
-         a single convex hull of the entire scene — coarse but always works.
+      1. Decimate huge meshes (coarse collision geometry needs few faces).
+      2. If trimesh has a working VHACD/CoACD backend, use it.
+      3. Else take convex hulls of the largest connected components.
+      4. If that yields nothing, a single convex hull of the whole scene.
 
     The MVP intentionally accepts coarse collision geometry; tightening this
     is a known follow-up (PRD: "balance collision fidelity against simulation
     speed", Key technical challenge #1).
     """
-    if cfg.decompose:
+    work = _decimate_for_collision(mesh)
+
+    # Only attempt VHACD if the mesh is a sane size — it's slow/heavy on a
+    # multi-million-face mesh, and the component fallback is always safe.
+    if cfg.decompose and len(work.faces) <= _COLLISION_MAX_FACES * 4:
         try:
             hulls = trimesh.decomposition.convex_decomposition(
-                mesh, maxNumVerticesPerCH=64, resolution=100_000
+                work, maxNumVerticesPerCH=64, resolution=100_000
             )
             if hulls:
                 hulls = [h for h in hulls if h.is_volume and h.volume > 1e-6]
@@ -141,12 +293,8 @@ def decompose(mesh: trimesh.Trimesh, cfg: BuildConfig) -> list[trimesh.Trimesh]:
         except Exception:
             pass
 
-    components = mesh.split(only_watertight=False)
-    if len(components) == 0:
-        components = [mesh]
-
     hulls: list[trimesh.Trimesh] = []
-    for c in components[: cfg.max_hulls]:
+    for c in _largest_components(work, cfg.max_hulls):
         try:
             h = c.convex_hull
             if h.is_volume and h.volume > 1e-6:
@@ -155,7 +303,10 @@ def decompose(mesh: trimesh.Trimesh, cfg: BuildConfig) -> list[trimesh.Trimesh]:
             continue
 
     if not hulls:
-        hulls = [mesh.convex_hull]
+        try:
+            hulls = [work.convex_hull]
+        except Exception:
+            hulls = [mesh.convex_hull]
 
     return hulls
 
@@ -226,6 +377,7 @@ def write_mjcf(
     enclose: bool = True,
     wall_margin: float = 0.25,
     wall_thickness: float = 0.08,
+    boxes: list[tuple[float, float, float, float, float, float]] | None = None,
 ) -> Path:
     mesh_dir = out_dir / "meshes"
     mesh_dir.mkdir(parents=True, exist_ok=True)
@@ -330,6 +482,24 @@ def write_mjcf(
             mesh=Path(fname).stem,
             rgba=" ".join(f"{v:.3f}" for v in mat["rgba"]),
             friction=" ".join(f"{v:.4f}" for v in mat["friction"]),
+        )
+    # Occupancy-column collision (scan meshes). Named hull_box_* so NavEnv
+    # counts touches as scene collisions and lidar sees them (env matches the
+    # `hull_` prefix).
+    for i, (cx, cy, hx, hy, z0, z1) in enumerate(boxes or []):
+        ET.SubElement(
+            scene_body,
+            "geom",
+            name=f"hull_box_{i:04d}",
+            type="box",
+            size=f"{hx:.4f} {hy:.4f} {(z1 - z0) / 2:.4f}",
+            pos=f"{cx:.4f} {cy:.4f} {(z0 + z1) / 2:.4f}",
+            contype="1",
+            conaffinity="1",
+            condim="3",
+            group="1",
+            rgba="0.78 0.78 0.78 1",
+            friction="1.0 0.005 0.0001",
         )
 
     # Invisible boundary walls — enclose the navigable footprint so the agent
@@ -450,16 +620,26 @@ def build_environment(cfg: BuildConfig) -> BuildArtifacts:
     if isinstance(raw, trimesh.Scene):
         raw = trimesh.util.concatenate(tuple(raw.geometry.values()))
 
-    mesh, floor_z = preprocess(raw, cfg)
+    mesh, floor_z, raw_to_sim = preprocess(raw, cfg)
     bounds = mesh.bounds
     spawn_region = _spawn_region_from_bounds(bounds)
 
-    hulls = decompose(mesh, cfg)
-    classes = [classify_hull(h, bounds) for h in hulls]
-
-    keep_idx = [i for i, c in enumerate(classes) if c != "floor"]
-    hulls = [hulls[i] for i in keep_idx]
-    classes = [classes[i] for i in keep_idx]
+    # Phone scans (dense, noisy, partial): ground the nav world at the REAL
+    # floor and collide against 2.5D occupancy columns. Convex hulls of a
+    # curved shell wrap free space and leave the agent "in collision"
+    # everywhere; box columns hug the actual walls/furniture.
+    is_scan = len(mesh.vertices) >= 20_000
+    boxes: list[tuple[float, float, float, float, float, float]] = []
+    if is_scan:
+        floor_z = _real_floor_z(mesh)
+        boxes = _occupancy_columns(mesh, floor_z)
+        hulls, classes = [], []
+    else:
+        hulls = decompose(mesh, cfg)
+        classes = [classify_hull(h, bounds) for h in hulls]
+        keep_idx = [i for i, c in enumerate(classes) if c != "floor"]
+        hulls = [hulls[i] for i in keep_idx]
+        classes = [classes[i] for i in keep_idx]
 
     mjcf_path = write_mjcf(
         hulls=hulls,
@@ -471,6 +651,7 @@ def build_environment(cfg: BuildConfig) -> BuildArtifacts:
         enclose=cfg.enclose,
         wall_margin=cfg.wall_margin,
         wall_thickness=cfg.wall_thickness,
+        boxes=boxes,
     )
 
     materials = {f"hull_{i:04d}": MATERIAL_TABLE[c] for i, c in enumerate(classes)}
@@ -480,16 +661,18 @@ def build_environment(cfg: BuildConfig) -> BuildArtifacts:
         "bounds_max": bounds[1].tolist(),
         "floor_z": float(floor_z),
         "spawn_region": list(spawn_region),
-        "n_hulls": len(hulls),
+        "n_hulls": len(hulls) + len(boxes),
+        "raw_to_sim": raw_to_sim.tolist(),
     }
     (out_dir / "metadata.json").write_text(json.dumps(metadata, indent=2))
 
     return BuildArtifacts(
         mjcf_path=mjcf_path,
         mesh_dir=out_dir / "meshes",
-        n_hulls=len(hulls),
+        n_hulls=len(hulls) + len(boxes),
         bounds=bounds,
         floor_z=floor_z,
         spawn_region=spawn_region,
         materials=materials,
+        raw_to_sim=raw_to_sim,
     )
