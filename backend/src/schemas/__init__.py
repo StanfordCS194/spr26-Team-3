@@ -81,11 +81,55 @@ class BuildRequest(BaseModel):
     target_diagonal_m: float | None = None
     max_hulls: int | None = None
     up_axis: str = "auto"
+    enclose: bool = True
+    """Wrap the scene in invisible boundary walls so the agent can't leave a
+    partial/open reconstruction."""
+
+
+class Goal3D(BaseModel):
+    x: float
+    y: float
+    z: float
+    radius: float = 0.3
+
+
+class TaskCreate(BaseModel):
+    name: str | None = None
+    objective_nl: str = ""
+    env_nl: str = ""
+    agent_nl: str = ""
+    goal_3d: dict | None = None
+
+
+class TaskPatch(BaseModel):
+    name: str | None = None
+    objective_nl: str | None = None
+    env_nl: str | None = None
+    agent_nl: str | None = None
+    goal_3d: dict | None = None
+
+
+class TaskOut(ORMModel):
+    id: str
+    project_id: str
+    build_id: str
+    name: str
+    objective_nl: str
+    env_nl: str
+    agent_nl: str
+    goal_3d: dict | None
+    status: str
+    error: str | None
+    codegen_model: str | None
+    current_version_id: str | None
+    current_code: str | None
+    created_at: datetime
 
 
 class PolicyOut(ORMModel):
     id: str
     build_id: str
+    task_version_id: str | None
     algo: str
     ckpt_path: str
     total_steps: int

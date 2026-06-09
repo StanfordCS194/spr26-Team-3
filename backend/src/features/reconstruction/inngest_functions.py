@@ -68,11 +68,14 @@ async def reconstruct_video(ctx: inngest.Context) -> dict:
         backend = get_backend(backend_name)
         out_dir = settings.data_dir / "projects" / extracted["project_id"] / "reconstruction"
         t0 = time.time()
+        # Forward reconstruction tunables (depth model, FOV override) to the
+        # backend; depth_fusion reads them from intrinsics_hint.
+        hint = {k: params[k] for k in ("depth_model", "fov_deg") if k in params}
         result = backend.reconstruct(
             ReconstructionInput(
                 frames_dir=Path(extracted["frames_dir"]),
                 fps_sampled=float(params.get("fps", 4.0)),
-                intrinsics_hint=None,
+                intrinsics_hint=hint or None,
             ),
             out_dir,
             progress_cb=lambda _p, _m: None,

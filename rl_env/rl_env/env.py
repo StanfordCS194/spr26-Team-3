@@ -112,10 +112,13 @@ class NavEnv(gym.Env):
         )
 
     def _collect_scene_geoms(self) -> set[int]:
+        # Reconstructed hulls *and* the invisible boundary walls count as the
+        # "scene" the agent collides with (so touching a boundary is penalized
+        # like a wall; the agent senses them via lidar too).
         ids: set[int] = set()
         for i in range(self.model.ngeom):
             name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, i)
-            if name and name.startswith("hull_"):
+            if name and (name.startswith("hull_") or name.startswith("boundary_")):
                 ids.add(i)
         return ids
 

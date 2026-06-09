@@ -40,6 +40,15 @@ class BuildConfig:
     """Cap on convex hulls when decomposing. More hulls = more accurate collisions, slower sim."""
     decompose: bool = True
     """If False, use connected-component hulls (fast); skips per-shape decomposition."""
+    enclose: bool = True
+    """Wrap the scene in invisible boundary walls so the agent can't wander out
+    of partial/open reconstructions (a half-recorded room has open sides). The
+    walls sit at the mesh's XY bounds + `wall_margin` and are collidable +
+    lidar-visible but not rendered."""
+    wall_margin: float = 0.25
+    """Gap (meters) between the reconstructed geometry and the boundary walls."""
+    wall_thickness: float = 0.08
+    """Half-thickness (meters) of the invisible boundary walls."""
 
 
 @dataclass
@@ -213,6 +222,10 @@ def write_mjcf(
     out_dir: Path,
     floor_z: float,
     spawn_region: tuple[float, float, float, float],
+    bounds: np.ndarray | None = None,
+    enclose: bool = True,
+    wall_margin: float = 0.25,
+    wall_thickness: float = 0.08,
 ) -> Path:
     mesh_dir = out_dir / "meshes"
     mesh_dir.mkdir(parents=True, exist_ok=True)
@@ -319,6 +332,45 @@ def write_mjcf(
             friction=" ".join(f"{v:.4f}" for v in mat["friction"]),
         )
 
+    # Invisible boundary walls — enclose the navigable footprint so the agent
+    # can't escape a partial/open reconstruction. Sit at the mesh XY bounds +
+    # margin, floor-to-ceiling. Collidable + lidar-visible, but rgba alpha 0 so
+    # they don't render. Named `boundary_*` so NavEnv counts touches as
+    # collisions (see env._collect_scene_geoms).
+    if enclose and bounds is not None:
+        bx0, by0, bz0 = float(bounds[0][0]), float(bounds[0][1]), float(bounds[0][2])
+        bx1, by1, bz1 = float(bounds[1][0]), float(bounds[1][1]), float(bounds[1][2])
+        x0, x1 = bx0 - wall_margin, bx1 + wall_margin
+        y0, y1 = by0 - wall_margin, by1 + wall_margin
+        wall_h = max(bz1 - bz0, 1.0)  # at least 1 m so the agent can't roll over
+        zc = floor_z + wall_h / 2.0
+        cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+        hx, hy = (x1 - x0) / 2.0, (y1 - y0) / 2.0
+        t = wall_thickness
+        bf = "1.0 0.005 0.0001"
+        boundary = ET.SubElement(worldbody, "body", name="boundary", pos="0 0 0")
+        walls = [
+            ("boundary_xmin", f"{t} {hy + t} {wall_h / 2:.4f}", f"{x0:.4f} {cy:.4f} {zc:.4f}"),
+            ("boundary_xmax", f"{t} {hy + t} {wall_h / 2:.4f}", f"{x1:.4f} {cy:.4f} {zc:.4f}"),
+            ("boundary_ymin", f"{hx + t} {t} {wall_h / 2:.4f}", f"{cx:.4f} {y0:.4f} {zc:.4f}"),
+            ("boundary_ymax", f"{hx + t} {t} {wall_h / 2:.4f}", f"{cx:.4f} {y1:.4f} {zc:.4f}"),
+        ]
+        for name, size, pos in walls:
+            ET.SubElement(
+                boundary,
+                "geom",
+                name=name,
+                type="box",
+                size=size,
+                pos=pos,
+                contype="1",
+                conaffinity="1",
+                condim="3",
+                group="3",
+                rgba="0 0 0 0",
+                friction=bf,
+            )
+
     xmin, xmax, ymin, ymax = spawn_region
     spawn_x = (xmin + xmax) / 2
     spawn_y = (ymin + ymax) / 2
@@ -415,6 +467,10 @@ def build_environment(cfg: BuildConfig) -> BuildArtifacts:
         out_dir=out_dir,
         floor_z=floor_z,
         spawn_region=spawn_region,
+        bounds=bounds,
+        enclose=cfg.enclose,
+        wall_margin=cfg.wall_margin,
+        wall_thickness=cfg.wall_thickness,
     )
 
     materials = {f"hull_{i:04d}": MATERIAL_TABLE[c] for i, c in enumerate(classes)}

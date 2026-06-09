@@ -30,6 +30,7 @@ async def build_env(ctx: inngest.Context) -> dict:
     target_diagonal_m: float | None = payload.get("target_diagonal_m")
     max_hulls: int = int(payload.get("max_hulls") or 64)
     up_axis: str = payload.get("up_axis") or "auto"
+    enclose: bool = payload.get("enclose", True)
 
     log.info("build-env: %s", build_id)
 
@@ -62,6 +63,7 @@ async def build_env(ctx: inngest.Context) -> dict:
                 target_diagonal_m=target_diagonal_m or settings.default_target_diagonal_m,
                 up_axis=up_axis,
                 max_hulls=max_hulls,
+                enclose=enclose,
             )
         )
 

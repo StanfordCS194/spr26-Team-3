@@ -54,6 +54,7 @@ async def build_project(
                     "target_diagonal_m": body.target_diagonal_m,
                     "max_hulls": body.max_hulls,
                     "up_axis": body.up_axis,
+                    "enclose": body.enclose,
                 },
             )
         ]

@@ -14,7 +14,7 @@ from sqlalchemy import select
 
 from src.config import get_settings
 from src.deps import DbSession, ProjectDep
-from src.models import Build, Policy, Project, Reconstruction, Run, Validation
+from src.models import Build, Policy, Project, Reconstruction, Run, Task, Validation
 from src.schemas import ProjectCreate, ProjectOut, RunOut
 
 router = APIRouter()
@@ -30,6 +30,7 @@ class ProjectState(BaseModel):
     reconstruct: StageState
     validate: StageState
     build: StageState
+    task: StageState
     train: StageState
     replay: StageState
 
@@ -251,6 +252,15 @@ def get_project_state(project: ProjectDep, db: DbSession) -> ProjectState:
         if last_build
         else None
     )
+    last_task = (
+        db.scalars(
+            select(Task).where(Task.build_id == last_build.id).order_by(Task.created_at.desc())
+        ).first()
+        if last_build
+        else None
+    )
+    task_ready = last_task is not None and last_task.status == "ready"
+    build_ok = last_build is not None and last_build.status == "ok"
 
     return ProjectState(
         capture=StageState(
@@ -266,12 +276,22 @@ def get_project_state(project: ProjectDep, db: DbSession) -> ProjectState:
             reason=None if validation_passed else "Validate lands in PR-B.",
         ),
         build=StageState(
-            complete=last_build is not None,
-            reason=None if last_build else "No build yet. Click 'Build env'.",
+            complete=build_ok,
+            reason=None if build_ok else "No build yet. Click 'Build env'.",
+        ),
+        task=StageState(
+            complete=task_ready,
+            reason=None
+            if task_ready
+            else (
+                "Author a task on the Task stage (UI lands in PR-3)."
+                if build_ok
+                else "Complete Build before authoring a task."
+            ),
         ),
         train=StageState(
             complete=last_policy is not None,
-            reason=None if last_policy else "Train lands in PR-C.",
+            reason=None if last_policy else "Train a policy on the Train stage.",
         ),
         replay=StageState(
             complete=last_build is not None,

@@ -15,6 +15,7 @@ from pathlib import Path
 import inngest
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
 from nanoid import generate as nanoid
+from pydantic import BaseModel
 from sqlalchemy import select
 
 from src.config import get_settings
@@ -144,11 +145,12 @@ def _run_reconstruction_blocking(
         backend = get_backend(backend_name)
         out_dir = settings.data_dir / "projects" / project_id / "reconstruction"
         t0 = time.time()
+        hint = {k: params[k] for k in ("depth_model", "fov_deg") if k in params}
         result = backend.reconstruct(
             ReconstructionInput(
                 frames_dir=frames_dir,
                 fps_sampled=float(params.get("fps", 4.0)),
-                intrinsics_hint=None,
+                intrinsics_hint=hint or None,
             ),
             out_dir,
             progress_cb=lambda p, m: None,
@@ -182,3 +184,54 @@ def latest_reconstruction(project: ProjectDep, db: DbSession) -> Reconstruction 
         .where(Reconstruction.project_id == project.id)
         .order_by(Reconstruction.created_at.desc())
     ).first()
+
+
+class MeshTransformRequest(BaseModel):
+    # 16 floats, column-major (THREE.Matrix4.elements). Maps the raw mesh coords
+    # to the placement the user arranged in the viewer, so we can bake it in.
+    matrix: list[float]
+
+
+@router.post(
+    "/projects/{project_id}/reconstruction/transform",
+    response_model=ReconstructionOut,
+)
+def transform_reconstruction(
+    project: ProjectDep, db: DbSession, body: MeshTransformRequest
+) -> Reconstruction:
+    """Bake a rigid+scale placement (rotate / move / scale) into the latest
+    reconstruction's mesh + point cloud, in place, so the downstream Build step
+    uses the corrected environment. The transform is computed client-side in the
+    viewer and passed as a 4x4 matrix — what you see is what gets baked."""
+    recon = db.scalars(
+        select(Reconstruction)
+        .where(Reconstruction.project_id == project.id, Reconstruction.status == "ok")
+        .order_by(Reconstruction.created_at.desc())
+    ).first()
+    if recon is None or not recon.mesh_path:
+        raise HTTPException(400, "no reconstruction mesh to transform")
+    if len(body.matrix) != 16:
+        raise HTTPException(422, "matrix must have 16 elements (column-major 4x4)")
+
+    import numpy as np
+    import trimesh
+
+    # THREE.Matrix4.elements is column-major; numpy/trimesh want row-major.
+    M = np.array(body.matrix, dtype=np.float64).reshape(4, 4).T
+
+    mesh_path = Path(recon.mesh_path)
+    if not mesh_path.exists():
+        raise HTTPException(404, "mesh file missing on disk")
+
+    # Apply to the mesh and (if present) the matching point cloud.
+    for p in (mesh_path, mesh_path.with_name("points.ply")):
+        if not p.exists():
+            continue
+        geom = trimesh.load(p, process=False)
+        geom.apply_transform(M)
+        geom.export(p)
+
+    recon.params = {**(recon.params or {}), "placement_applied": True}
+    db.commit()
+    db.refresh(recon)
+    return recon

@@ -4,18 +4,18 @@ Sequenced as small PRs, each one leaving the product in a runnable state.
 
 ## PR-1 — Task data model + ABC
 
-- [ ] Alembic migration: `task`, `task_version` tables; `policy.task_version_id` FK.
-- [ ] `backend/src/rl/task_abc.py`: the `Task` abstract base, obs/action space helpers, validate signature.
-- [ ] `backend/src/features/tasks/router.py`: CRUD endpoints `POST /api/projects/{id}/tasks`, `GET .../tasks`, `GET .../tasks/{tid}`, `PATCH` for NL field edits.
-- [ ] Pause-stage: Train still uses the hardcoded task (existing behavior) — no UI change yet.
+- [x] Alembic migration: `task`, `task_version` tables; `policy.task_version_id` FK.
+- [x] `backend/src/rl/task_abc.py`: the `Task` abstract base, obs/action space helpers, validate signature.
+- [x] `backend/src/features/tasks/router.py`: CRUD endpoints `POST /api/projects/{id}/tasks`, `GET .../tasks`, `GET .../tasks/{tid}`, `PATCH` for NL field edits.
+- [x] Pause-stage: Train still uses the hardcoded task (existing behavior) — no UI change yet.
 
 ## PR-2 — Codegen via Inngest
 
-- [ ] `task/codegen_requested` Inngest event + function (`backend/src/features/tasks/inngest_functions.py`).
-- [ ] Claude API client (`anthropic` Python SDK already pinned in Haleum — copy the pattern).
-- [ ] Prompt template that injects mesh bounds, spawn region, NL fields, optional goal_3d.
-- [ ] `task.status` flips drafting → generating → ready/failed via the same generic `mark_row_failed` handler.
-- [ ] `backend/src/rl/task_runtime.py`: restricted `exec()` loader, timeout wrapper, validator that the loaded module defines `GeneratedTask(Task)`.
+- [x] `task/codegen_requested` Inngest event + function (`backend/src/features/tasks/inngest_functions.py`).
+- [x] Claude API client (`anthropic` Python SDK already pinned in Haleum — copy the pattern).
+- [x] Prompt template that injects mesh bounds, spawn region, NL fields, optional goal_3d.
+- [x] `task.status` flips drafting → generating → ready/failed via the same generic `mark_row_failed` handler.
+- [x] `backend/src/rl/task_runtime.py`: restricted `exec()` loader, timeout wrapper, validator that the loaded module defines `GeneratedTask(Task)`.
 
 ## PR-3 — Task screen (frontend)
 

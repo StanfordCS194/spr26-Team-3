@@ -110,6 +110,7 @@ export type ProjectState = {
   reconstruct: StageState;
   validate: StageState;
   build: StageState;
+  task: StageState;
   train: StageState;
   replay: StageState;
 };
@@ -172,8 +173,11 @@ export type BuildRow = {
 export const useBuild = (projectId: string) => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () =>
-      send<BuildRow>(`/api/projects/${projectId}/build`, "POST", { up_axis: "y" }),
+    mutationFn: (opts?: { enclose?: boolean }) =>
+      send<BuildRow>(`/api/projects/${projectId}/build`, "POST", {
+        up_axis: "y",
+        enclose: opts?.enclose ?? true,
+      }),
     onSuccess: (created) => {
       // Seed the cache with the new pending row so the polling query
       // re-engages immediately instead of holding the previous status=ok.
@@ -267,6 +271,23 @@ export const useReconstruct = (projectId: string) => {
       qc.setQueryData(["reconstruction", projectId], created);
       qc.invalidateQueries({ queryKey: ["reconstruction", projectId] });
       qc.invalidateQueries({ queryKey: ["project-state", projectId] });
+    },
+  });
+};
+
+export const useApplyReconstructionTransform = (projectId: string) => {
+  const qc = useQueryClient();
+  return useMutation({
+    // `matrix` is the viewer's 4x4 placement (column-major, THREE.Matrix4.elements).
+    mutationFn: (matrix: number[]) =>
+      send<Reconstruction>(
+        `/api/projects/${projectId}/reconstruction/transform`,
+        "POST",
+        { matrix },
+      ),
+    onSuccess: (updated) => {
+      qc.setQueryData(["reconstruction", projectId], updated);
+      qc.invalidateQueries({ queryKey: ["reconstruction", projectId] });
     },
   });
 };
