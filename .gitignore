@@ -39,8 +39,9 @@ dist/
 .ruff_cache/
 .mypy_cache/
 
-# WorldScan runtime state (per-project artifacts)
+# WorldScan runtime state (per-project artifacts: frames, meshes, point clouds)
 /data/
+backend/data/
 
 # generated typegen
 shared/ts/api.d.ts
@@ -49,3 +50,4 @@ shared/ts/api.d.ts
 .env
 .env.local
 .env.*.local
+.gstack/
