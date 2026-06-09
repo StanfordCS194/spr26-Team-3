@@ -32,7 +32,6 @@ import numpy as np
 import trimesh
 from PIL import Image
 
-from src.features.reconstruction.backends import _replicate as rep
 from src.features.reconstruction.backends import register
 from src.features.reconstruction.backends._geometry import (
     assume_intrinsics,
@@ -108,8 +107,11 @@ def _write_ply_points(verts: np.ndarray, colors: np.ndarray, path: Path) -> None
 @register
 class DepthFusionBackend(ReconstructionBackend):
     name = "depth_fusion"
-    requires_gpu = False  # depth runs on Replicate; only ONNX + numpy run locally
-    implemented = rep.replicate_available()
+    # Default depth model is local (Matthew's Depth-Anything, small + CPU-OK),
+    # so this backend needs no cloud token. Pass intrinsics_hint={"depth_model":
+    # "cloud"} to route depth through Replicate instead.
+    requires_gpu = False
+    implemented = True
 
     def reconstruct(
         self,

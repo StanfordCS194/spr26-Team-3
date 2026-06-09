@@ -1,9 +1,14 @@
 """Model loaders + inference for depth-fusion.
 
-Monocular metric depth runs on Replicate (cloud GPU) — never locally. Loading
-depth/transformer models on the dev laptop is exactly what we're avoiding. The
-small SuperPoint + LightGlue ONNX models stay local: they're a few MB and run
-fine on CPU.
+Monocular metric depth runs LOCALLY by default — Matthew's Depth-Anything-V2
+(or Depth-Pro) pipeline, reused via `rl_env.server` so the legacy Flask
+`/api/depth` and this backend share weights. These models are small (~95MB)
+and run fine on a laptop CPU/MPS — unlike VGGT, they never crashed anything.
+
+A cloud depth path (`name="cloud"`, Replicate Depth-Anything-V3-metric) is kept
+as an option, but it costs one prediction PER FRAME, so it rate-limits hard on
+low-credit accounts. Local is the default. SuperPoint + LightGlue stay local
+(tiny ONNX, CPU).
 """
 from __future__ import annotations
 
@@ -18,8 +23,8 @@ from PIL import Image
 from src.config import get_settings
 from src.features.reconstruction.backends import _replicate as rep
 
-# Process-wide cache for ONNX sessions, guarded so concurrent Inngest workers
-# don't double-load.
+# Process-wide caches, guarded so concurrent Inngest workers don't double-load.
+_depth_lock = threading.Lock()
 _onnx_lock = threading.Lock()
 _onnx_sessions: dict[str, object] = {}
 
@@ -28,6 +33,59 @@ _onnx_sessions: dict[str, object] = {}
 # README). focal_px is derived from image width + FOV, matching the K that
 # depth_fusion builds with `assume_intrinsics`.
 _METRIC_DEPTH_DIVISOR = 300.0
+
+
+def get_depth_model(name: str = "indoor"):
+    """Return matthew's lazily-loaded local depth pipeline (`indoor` or `pro`).
+
+    Wraps `rl_env.server._ensure_depth_model` so the legacy Flask `/api/depth`
+    endpoint and this backend share the same in-memory weights.
+    """
+    from rl_env.server import _ensure_depth_model  # type: ignore[attr-defined]
+    with _depth_lock:
+        return _ensure_depth_model(name)
+
+
+def infer_depth(
+    image: Image.Image, name: str = "indoor", fov_deg: float = 60.0
+) -> tuple[np.ndarray, dict]:
+    """Run metric depth on a PIL image; return (depth_meters HxW, meta).
+
+    Default is Matthew's LOCAL model (`name` = "indoor"/"pro"). Pass
+    `name="cloud"` to use Replicate's Depth-Anything-V3-metric instead.
+    """
+    if name == "cloud":
+        return _infer_depth_cloud(image, fov_deg)
+
+    handle = get_depth_model(name)
+    meta: dict = {"depth_model": name}
+    if handle["kind"] == "pipeline":
+        out = handle["pipe"](image)
+        pred = out["predicted_depth"]
+        depth = pred.detach().cpu().numpy() if hasattr(pred, "detach") else np.asarray(pred)
+    elif handle["kind"] == "explicit":
+        import torch  # local: torch is in pyproject but defer importing it
+        proc = handle["proc"]
+        model = handle["model"]
+        device = handle["device"]
+        inputs = proc(images=image, return_tensors="pt").to(device)
+        with torch.inference_mode():
+            outputs = model(**inputs)
+        post = proc.post_process_depth_estimation(
+            outputs, target_sizes=[(image.height, image.width)]
+        )[0]
+        depth = post["predicted_depth"].detach().cpu().numpy()
+        fov_value = post.get("field_of_view") or post.get("fov")
+        if fov_value is not None:
+            meta["fov_deg"] = float(fov_value.item() if hasattr(fov_value, "item") else fov_value)
+    else:
+        raise ValueError(f"unknown depth handle kind {handle.get('kind')!r}")
+
+    depth = np.asarray(depth, dtype=np.float32)
+    while depth.ndim > 2:
+        depth = depth.squeeze(0)
+    meta["depth_shape"] = list(depth.shape)
+    return depth, meta
 
 
 def _pick_depth_array(payload: dict) -> np.ndarray:
@@ -49,52 +107,33 @@ def _pick_depth_array(payload: dict) -> np.ndarray:
     raise RuntimeError(f"no depth array in Replicate output keys: {list(payload)}")
 
 
-def infer_depth(
-    image: Image.Image, name: str = "indoor", fov_deg: float = 60.0
-) -> tuple[np.ndarray, dict]:
-    """Run metric depth inference on Replicate; return (depth_meters HxW, meta).
-
-    `name` is kept for call-site compatibility but no longer selects a local
-    model — the cloud model is fixed by `settings.replicate_depth_model`.
-    `fov_deg` must match the FOV depth_fusion uses for its intrinsics so the
-    focal-based metric scaling lines up with back-projection.
-    """
+def _infer_depth_cloud(image: Image.Image, fov_deg: float) -> tuple[np.ndarray, dict]:
+    """Cloud depth via Replicate (one prediction per frame — rate-limits)."""
     settings = get_settings()
     model_ref = settings.replicate_depth_model
-
-    # Replicate's file input wants a path/handle; write the PIL image to a temp.
     with tempfile.NamedTemporaryFile(suffix=".png", delete=True) as tmp:
         image.save(tmp.name, format="PNG")
         with open(tmp.name, "rb") as fh:
             output = rep.run_model(
                 model_ref,
-                {
-                    "images": [fh],
-                    "to_base64": True,
-                    "return_depth": True,
-                    "output_format": "json",
-                },
+                {"images": [fh], "to_base64": True, "return_depth": True,
+                 "output_format": "json"},
             )
-
     data_uris = output.get("data") if isinstance(output, dict) else None
     if not data_uris:
         raise RuntimeError(f"depth model (Replicate) returned no data: {output!r}")
     raw = _pick_depth_array(rep.fetch_json(data_uris[0])).astype(np.float32)
     while raw.ndim > 2:
         raw = raw.squeeze(0)
-
-    # Scale to metric meters using the focal length implied by image width + FOV
-    # (same convention as _geometry.assume_intrinsics).
+    # Scale to metric meters using the focal implied by image width + FOV.
     focal_px = image.width / (2.0 * np.tan(np.radians(fov_deg) / 2.0))
     depth = (raw * focal_px / _METRIC_DEPTH_DIVISOR).astype(np.float32)
-
-    meta = {
+    return depth, {
         "depth_model": model_ref,
         "depth_shape": list(depth.shape),
         "focal_px": float(focal_px),
         "metric_scale": float(focal_px / _METRIC_DEPTH_DIVISOR),
     }
-    return depth, meta
 
 
 def _models_cache_dir() -> Path:
@@ -225,6 +264,7 @@ def match_lightglue(feat_a: dict, feat_b: dict, image_size: tuple[int, int]) -> 
 
 
 __all__ = [
+    "get_depth_model",
     "infer_depth",
     "extract_superpoint",
     "match_lightglue",
