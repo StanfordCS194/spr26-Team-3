@@ -173,8 +173,11 @@ export type BuildRow = {
 export const useBuild = (projectId: string) => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () =>
-      send<BuildRow>(`/api/projects/${projectId}/build`, "POST", { up_axis: "y" }),
+    mutationFn: (opts?: { enclose?: boolean }) =>
+      send<BuildRow>(`/api/projects/${projectId}/build`, "POST", {
+        up_axis: "y",
+        enclose: opts?.enclose ?? true,
+      }),
     onSuccess: (created) => {
       // Seed the cache with the new pending row so the polling query
       // re-engages immediately instead of holding the previous status=ok.

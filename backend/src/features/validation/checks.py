@@ -51,9 +51,11 @@ def check_watertight(mesh: trimesh.Trimesh) -> CheckResult:
         )
     return CheckResult(
         "watertight",
-        "fail",
-        f"{closed}/{len(parts)} components closed — mesh has holes",
-        "Single-photo reconstructions are 2.5D and open at the back. Use multi-frame video or LiDAR.",
+        "warn",
+        f"{closed}/{len(parts)} components closed — open/partial scan",
+        "Partial captures (e.g. half a room) are open at the back. Build wraps "
+        "the scene in invisible boundary walls so the agent stays inside; "
+        "multi-frame video or LiDAR gives a more complete mesh.",
     )
 
 
@@ -165,9 +167,11 @@ def check_floor_detected(mesh: trimesh.Trimesh) -> CheckResult:
         )
     return CheckResult(
         "floor_detected",
-        "fail",
-        "no flat ground plane found",
-        "Without a floor, the agent has nowhere to spawn. Record with the camera tilted slightly down.",
+        "warn",
+        "little/no floor captured in the scan",
+        "Build adds a ground plane under the scene, so the agent can still "
+        "spawn — but capturing more floor (camera tilted slightly down) improves "
+        "coverage and the spawn area.",
     )
 
 

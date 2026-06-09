@@ -1,4 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useState } from "react";
 
 import { ProjectSceneLayout } from "@/components/ProjectSceneLayout";
 import { StatusDot } from "@/components/StatusDot";
@@ -13,6 +14,7 @@ function BuildScreen() {
   const build = useBuild(projectId);
   const { data: latest } = useLatestBuild(projectId);
   const navigate = useNavigate();
+  const [enclose, setEnclose] = useState(true);
 
   const running = latest?.status === "pending" || latest?.status === "running";
 
@@ -26,10 +28,27 @@ function BuildScreen() {
         </p>
       </header>
 
+      <label className="mt-6 flex items-start gap-2 text-sm max-w-md cursor-pointer">
+        <input
+          type="checkbox"
+          checked={enclose}
+          disabled={running}
+          onChange={(e) => setEnclose(e.target.checked)}
+          className="mt-0.5 accent-[var(--primary)]"
+        />
+        <span>
+          Enclose with invisible boundary walls
+          <span className="block text-xs text-muted-foreground">
+            Keeps the agent inside partial/open scans (e.g. a half-recorded
+            room). Recommended.
+          </span>
+        </span>
+      </label>
+
       <button
         disabled={build.isPending || running}
-        onClick={() => build.mutate()}
-        className="mt-6 px-4 py-2 rounded-sm border-2 border-primary text-primary text-sm font-medium hover:bg-primary/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+        onClick={() => build.mutate({ enclose })}
+        className="mt-4 px-4 py-2 rounded-sm border-2 border-primary text-primary text-sm font-medium hover:bg-primary/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
       >
         {running ? "Building…" : build.isPending ? "Queuing…" : latest ? "Re-build env" : "Build env"}
       </button>
