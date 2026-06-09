@@ -55,7 +55,7 @@ services:
       - ./backend:/app
       - ./rl_env:/rl_env  # matches pyproject workspace member ../rl_env (WORKDIR=/app)
       - ./data:/data
-      - /app/.venv  # anonymous vol: container's Linux venv, not the host's
+      - backend_api_venv:/app/.venv  # named vol persists across `down` (no full re-sync)
     develop:
       watch:
         - action: sync
@@ -81,7 +81,7 @@ services:
       - ./backend:/app
       - ./rl_env:/rl_env  # matches pyproject workspace member ../rl_env (WORKDIR=/app)
       - ./data:/data
-      - /app/.venv  # anonymous vol: container's Linux venv, not the host's
+      - backend_worker_venv:/app/.venv  # named vol persists across `down` (no full re-sync)
     develop:
       watch:
         - action: sync
@@ -111,3 +111,5 @@ services:
 volumes:
   pgdata:
   frontend_node_modules:
+  backend_api_venv:
+  backend_worker_venv:
