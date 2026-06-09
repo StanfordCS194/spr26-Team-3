@@ -122,6 +122,19 @@ class VGGTBackend(ReconstructionBackend):
 
         progress_cb(0.10, f"uploading {len(frame_paths)} frames to {model_ref}")
         progress_cb(0.20, "running VGGT on Replicate (cloud GPU)")
+        # VETTED UPGRADE PATH (not applied here, deliberately deferred):
+        # `vufinder/map-anything` is a metric, same-owner hosted upgrade. The
+        # swap is ~a per-frame key rename in the download loop below:
+        #   world_points -> pts3d, world_points_conf -> conf (image unchanged).
+        # BUT before switching, handle these caveats:
+        #   (a) map-anything resizes inputs to a fixed 518x518, changing grid
+        #       dimensions and thus the _MAX_GRID_SIDE / stride math above;
+        #   (b) it is METRIC (vs vggt-1b's scale-invariant) output, so
+        #       _grid_to_mesh's percentile edge-length discontinuity cutoff
+        #       (vggt.py span_thresh) should become a real metric threshold —
+        #       a blind rename would silently regress mesh quality;
+        #   (c) it returns camera_poses + intrinsics the current code ignores.
+        # Verify each against live output before flipping config.py's default.
         output = rep.run_model(
             model_ref,
             {

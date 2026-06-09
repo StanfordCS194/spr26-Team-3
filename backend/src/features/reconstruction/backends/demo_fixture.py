@@ -5,6 +5,9 @@ replay) be exercised end-to-end without a GPU, real model weights, or even
 a valid input video. The "reconstruction" produced is the same procedural
 mesh `rl_env.sample_room` writes — sized roughly to the number of frames
 so different videos give visibly different scenes.
+
+This is a dev/test fixture (the inngest offline default + e2e path), NOT a
+reconstruction backend users should pick for a real scan.
 """
 from __future__ import annotations
 
@@ -13,8 +16,8 @@ from collections.abc import Callable
 from pathlib import Path
 
 import trimesh
-
 from rl_env.sample_room import make_sample_room
+
 from src.features.reconstruction.backends import register
 from src.features.reconstruction.backends.base import (
     ReconstructionBackend,

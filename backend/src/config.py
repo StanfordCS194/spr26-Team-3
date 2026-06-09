@@ -29,8 +29,9 @@ class Settings(BaseSettings):
     replicate_api_token: str = ""
     replicate_vggt_model: str = "vufinder/vggt-1b"
     replicate_depth_model: str = "vufinder/depth-anything-v3-metric"
-    replicate_colmap_model: str = "jimothyjohn/colmap"
-    # Gaussian-splatting trainer fed COLMAP poses + images (splat backend).
+    # Gaussian-splatting trainer fed depth_fusion poses + init cloud (splat
+    # backend). Empty until a multi-view 3DGS trainer is hosted, which keeps the
+    # splat backend implemented=False.
     replicate_splat_model: str = ""
 
     # Build / RL defaults (exposed in the frontend's Advanced panel)
