@@ -120,21 +120,27 @@ def _onnx_session(name: str):
         return sess
 
 
-def _preprocess_for_superpoint(image: Image.Image, max_side: int = 512) -> tuple[np.ndarray, float]:
-    """Grayscale + resize-down to keep the longer side ≤ max_side. Returns
-    (image_array float32 0-1, scale_factor) so detected keypoints can be
-    mapped back to original coordinates.
+def _preprocess_for_superpoint(image: Image.Image, max_side: int = 1536) -> tuple[np.ndarray, float, float]:
+    """Grayscale + resize so the longer side ≤ max_side, with both dims
+    quantized to a multiple of 8 (SuperPoint's ONNX export expects /8-divisible
+    spatial dims, and the prototype found coarser inputs lose keypoints).
+
+    Returns (image_array float32 0-1 shaped (1,1,H,W), scale_x, scale_y) so
+    detected keypoints in the resized grid can be mapped back to original pixel
+    coordinates. Mirrors `preprocessForSuperPoint` in prototype/v4.2.html
+    (SP_MAX_DIM=1536, round to multiple of 8, min 32).
     """
     w, h = image.size
     scale = min(1.0, float(max_side) / float(max(w, h)))
-    if scale < 1.0:
-        new_w, new_h = int(round(w * scale)), int(round(h * scale))
+    new_w = max(32, int(round(w * scale / 8.0)) * 8)
+    new_h = max(32, int(round(h * scale / 8.0)) * 8)
+    if (new_w, new_h) != (w, h):
         image = image.resize((new_w, new_h), Image.BILINEAR)
     gray = image.convert("L")
     arr = np.asarray(gray, dtype=np.float32) / 255.0
     # SuperPoint expects (1, 1, H, W).
     arr = arr[None, None, :, :]
-    return arr, scale
+    return arr, new_w / float(w), new_h / float(h)
 
 
 def extract_superpoint(image: Image.Image, max_keypoints: int = 1024) -> dict:
@@ -144,7 +150,7 @@ def extract_superpoint(image: Image.Image, max_keypoints: int = 1024) -> dict:
     Caps to top-`max_keypoints` by score, matching matthew's heuristic.
     """
     sess = _onnx_session("superpoint")
-    arr, scale = _preprocess_for_superpoint(image)
+    arr, scale_x, scale_y = _preprocess_for_superpoint(image)
     inputs = {sess.get_inputs()[0].name: arr}
     out_names = [o.name for o in sess.get_outputs()]
     outs = sess.run(out_names, inputs)
@@ -156,9 +162,12 @@ def extract_superpoint(image: Image.Image, max_keypoints: int = 1024) -> dict:
     if kp.shape[0] > max_keypoints:
         top = np.argsort(scores)[-max_keypoints:]
         kp, scores, desc = kp[top], scores[top], desc[top]
-    if scale < 1.0:
-        kp = kp.astype(np.float32) / scale
-    return {"keypoints": kp.astype(np.float32), "descriptors": desc.astype(np.float32), "scores": scores.astype(np.float32)}
+    # Map keypoints from the (independently quantized) resized grid back to
+    # original pixel coordinates. x and y can have slightly different scales.
+    kp = kp.astype(np.float32)
+    kp[:, 0] /= scale_x
+    kp[:, 1] /= scale_y
+    return {"keypoints": kp, "descriptors": desc.astype(np.float32), "scores": scores.astype(np.float32)}
 
 
 def match_lightglue(feat_a: dict, feat_b: dict, image_size: tuple[int, int]) -> np.ndarray:
@@ -188,12 +197,21 @@ def match_lightglue(feat_a: dict, feat_b: dict, image_size: tuple[int, int]) -> 
     expected = {i.name for i in sess.get_inputs()}
     inputs = {k: v for k, v in inputs.items() if k in expected}
     out_names = [o.name for o in sess.get_outputs()]
-    outs = sess.run(out_names, inputs)
-    # The fabio-sim LightGlue ONNX exports `matches0` (1, M, 2) of (idx_a, idx_b).
-    matches = outs[0]
-    if matches.ndim == 3:
-        matches = matches[0]
-    return matches.astype(np.int64)
+    outs = dict(zip(out_names, sess.run(out_names, inputs)))
+    # The fabio-sim superpoint_lightglue ONNX returns `matches0` of shape
+    # (1, num_keypoints_a): for each keypoint in image A, the index of its
+    # matched keypoint in image B, or -1 if unmatched (LightGlue's learned
+    # threshold already filters weak matches). Convert that assignment array to
+    # explicit (idx_a, idx_b) pairs.
+    m0 = outs.get("matches0", next(iter(outs.values())))
+    m0 = np.asarray(m0)
+    while m0.ndim > 1:
+        m0 = m0[0]
+    idx_a = np.nonzero(m0 > -1)[0]
+    idx_b = m0[idx_a]
+    if idx_a.size == 0:
+        return np.zeros((0, 2), dtype=np.int64)
+    return np.stack([idx_a, idx_b], axis=1).astype(np.int64)
 
 
 __all__ = [

@@ -13,25 +13,33 @@ from src.features.reconstruction.backends._geometry import (
 )
 
 
-def test_robust_linear_fit_recovers_scale_offset() -> None:
+def test_robust_linear_fit_recovers_scale() -> None:
+    # Scale-only contract (matches prototype v4.2): recover k, offset fixed at 0.
     rng = np.random.default_rng(0)
     z_new = rng.uniform(0.5, 5.0, size=50)
-    k_true, c_true = 1.3, 0.2
-    z_ref = k_true * z_new + c_true + rng.normal(0, 0.01, size=50)
+    k_true = 1.3
+    z_ref = k_true * z_new + rng.normal(0, 0.01, size=50)
     k, c = robust_linear_fit(z_ref, z_new)
     assert abs(k - k_true) < 0.05
-    assert abs(c - c_true) < 0.05
+    assert c == 0.0
 
 
 def test_robust_linear_fit_survives_outliers() -> None:
     rng = np.random.default_rng(1)
     z_new = rng.uniform(0.5, 5.0, size=50)
-    z_ref = 1.1 * z_new + 0.05
-    # Corrupt 30% with wild outliers.
+    z_ref = 1.1 * z_new
+    # Corrupt 30% with wild outliers — the median ratio shrugs them off.
     z_ref[::3] = rng.uniform(-10, 50, size=z_ref[::3].shape)
     k, c = robust_linear_fit(z_ref, z_new)
     assert 0.9 < k < 1.3
-    assert -1.0 < c < 1.0
+    assert c == 0.0
+
+
+def test_robust_linear_fit_clamps_scale() -> None:
+    # Extreme scale is clamped to [0.5, 2.0] to guard ill-conditioned matches.
+    z_new = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+    k, c = robust_linear_fit(10.0 * z_new, z_new)
+    assert k == 2.0 and c == 0.0
 
 
 def test_robust_linear_fit_falls_back_when_too_few_points() -> None:

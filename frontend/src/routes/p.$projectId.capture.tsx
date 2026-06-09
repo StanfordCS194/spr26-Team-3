@@ -39,8 +39,9 @@ function Capture() {
         <header className="mb-8">
           <h1 className="text-2xl">Capture</h1>
           <p className="text-sm text-muted-foreground mt-1.5 max-w-xl">
-            Upload a short video of a room (mp4, mov, webm). The backend samples
-            ~24 frames evenly and feeds them to the reconstruction backend on
+            Upload a short video of a room (mp4, mov, webm) — or a photo (jpg,
+            png). The backend samples ~24 frames from a video (a photo is used
+            as a single frame) and feeds them to the reconstruction backend on
             the next step.
           </p>
         </header>
@@ -79,8 +80,8 @@ function Capture() {
             </div>
           ) : (
             <div>
-              <p className="text-sm">Drop a video here, or click to pick one</p>
-              <p className="text-xs text-muted-foreground mt-1">mp4 / mov / webm, ≤ 200 MB</p>
+              <p className="text-sm">Drop a video or photo here, or click to pick one</p>
+              <p className="text-xs text-muted-foreground mt-1">mp4 / mov / webm / jpg / png, ≤ 200 MB</p>
             </div>
           )}
         </section>

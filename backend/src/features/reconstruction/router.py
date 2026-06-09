@@ -144,11 +144,12 @@ def _run_reconstruction_blocking(
         backend = get_backend(backend_name)
         out_dir = settings.data_dir / "projects" / project_id / "reconstruction"
         t0 = time.time()
+        hint = {k: params[k] for k in ("depth_model", "fov_deg") if k in params}
         result = backend.reconstruct(
             ReconstructionInput(
                 frames_dir=frames_dir,
                 fps_sampled=float(params.get("fps", 4.0)),
-                intrinsics_hint=None,
+                intrinsics_hint=hint or None,
             ),
             out_dir,
             progress_cb=lambda p, m: None,
