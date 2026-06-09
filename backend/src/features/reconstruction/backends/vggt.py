@@ -1,22 +1,25 @@
-"""VGGT — feed-forward neural reconstruction.
+"""VGGT — feed-forward neural reconstruction, run on Replicate (cloud GPU).
 
-The `vggt` PyPI package wraps Meta's VGGT model. It needs a GPU (CUDA or
-Apple MPS) and downloads weights from HuggingFace on first run.
+VGGT is a 1B-param model whose global attention is O(n²) over every frame's
+patches at once. Loading it locally OOMs and crashes laptops, so this backend
+NEVER runs it on the worker. Instead it ships frames to Replicate
+(`vufinder/vggt-1b`, an L40S), downloads the per-frame world-point grids, and
+does the lightweight numpy/trimesh meshing locally.
 
-This backend tries to load and run the real model. If the package isn't
-installed, weights can't be fetched, or no compute device is available, it
-raises a clear error. To demo the rest of the pipeline without GPU, users
-select the `demo_fixture` backend instead.
+The backend reports `implemented` only when a Replicate token is configured
+(see `_replicate.replicate_available`). To demo the pipeline without cloud
+access, select the `demo_fixture` backend.
 """
 from __future__ import annotations
 
-import time
 from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
 import trimesh
 
+from src.config import get_settings
+from src.features.reconstruction.backends import _replicate as rep
 from src.features.reconstruction.backends import register
 from src.features.reconstruction.backends.base import (
     ReconstructionBackend,
@@ -24,33 +27,81 @@ from src.features.reconstruction.backends.base import (
     ReconstructionOutput,
 )
 
+# Cap the back-projected grid's longer side per frame so the concatenated
+# whole-scan mesh stays viewer-loadable (matches the depth_fusion budget).
+_MAX_GRID_SIDE = 240
+# Frames sent to VGGT in one run. The model resizes to ≤518px and runs on a
+# cloud L40S, so this is a cost/latency knob, not a local-memory limit.
+_MAX_FRAMES = 32
 
-def _vggt_available() -> bool:
-    """Accept either the official `vggt` package (CUDA) or the `vggt_mps`
-    community fork (Apple Metal). Both ship under different module names."""
-    try:
-        import torch
-    except ImportError:
-        return False
-    if not (torch.cuda.is_available() or torch.backends.mps.is_available()):
-        return False
-    try:
-        import vggt  # noqa: F401
-        return True
-    except ImportError:
-        pass
-    try:
-        import vggt_mps  # noqa: F401
-        return True
-    except ImportError:
-        return False
+
+def _grid_to_mesh(
+    points: np.ndarray,
+    color01: np.ndarray,
+    conf: np.ndarray,
+    conf_thresh: float,
+    stride: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Triangulate a VGGT (H,W,3) world-point grid into a colored mesh.
+
+    Skips low-confidence pixels and the longest ~10% of edges (depth
+    discontinuities → stretched ghost faces). Pure numpy/trimesh — no open3d,
+    which has no Python 3.13 wheels. `color01` is (H,W,3) in [0,1].
+    """
+    if stride > 1:
+        points = points[::stride, ::stride]
+        color01 = color01[::stride, ::stride]
+        conf = conf[::stride, ::stride]
+    H, W, _ = points.shape
+    verts = points.reshape(-1, 3).astype(np.float64)
+    cols = np.clip(color01.reshape(-1, 3) * 255.0, 0, 255).astype(np.uint8)
+
+    valid = conf >= conf_thresh
+    idx = np.arange(H * W, dtype=np.int64).reshape(H, W)
+    i0, i1 = idx[:-1, :-1].ravel(), idx[:-1, 1:].ravel()
+    i2, i3 = idx[1:, :-1].ravel(), idx[1:, 1:].ravel()
+    v0, v1 = valid[:-1, :-1].ravel(), valid[:-1, 1:].ravel()
+    v2, v3 = valid[1:, :-1].ravel(), valid[1:, 1:].ravel()
+
+    p = verts
+
+    def edge(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+        return np.linalg.norm(p[a] - p[b], axis=1)
+
+    span = np.maximum.reduce([
+        edge(i0, i1), edge(i0, i2), edge(i0, i3),
+        edge(i1, i2), edge(i1, i3), edge(i2, i3),
+    ])
+    # Scale-free discontinuity cutoff: VGGT world units are arbitrary, so use a
+    # percentile of edge lengths rather than a fixed metric threshold.
+    finite = span[np.isfinite(span)]
+    span_thresh = float(np.quantile(finite, 0.90)) if finite.size else np.inf
+    ok = v0 & v1 & v2 & v3 & (span <= span_thresh)
+    faces = np.concatenate([
+        np.stack([i0[ok], i2[ok], i1[ok]], axis=1),
+        np.stack([i1[ok], i2[ok], i3[ok]], axis=1),
+    ], axis=0)
+    return verts.astype(np.float32), faces.astype(np.int64), cols
+
+
+def _as_hw3_color(image: np.ndarray) -> np.ndarray:
+    """Normalize a decoded VGGT image array to (H,W,3) float in [0,1]."""
+    arr = np.asarray(image)
+    if arr.ndim == 3 and arr.shape[0] in (1, 3) and arr.shape[-1] not in (1, 3):
+        arr = arr.transpose(1, 2, 0)  # (C,H,W) -> (H,W,C)
+    if arr.shape[-1] == 1:
+        arr = np.repeat(arr, 3, axis=-1)
+    arr = arr.astype(np.float32)
+    if arr.max() > 1.5:  # uint8-style 0..255
+        arr = arr / 255.0
+    return arr[..., :3]
 
 
 @register
 class VGGTBackend(ReconstructionBackend):
     name = "vggt"
-    requires_gpu = True
-    implemented = _vggt_available()
+    requires_gpu = False  # inference runs on Replicate's GPU, not the worker
+    implemented = rep.replicate_available()
 
     def reconstruct(
         self,
@@ -59,72 +110,83 @@ class VGGTBackend(ReconstructionBackend):
         progress_cb: Callable[[float, str], None],
     ) -> ReconstructionOutput:
         out_dir.mkdir(parents=True, exist_ok=True)
-        progress_cb(0.05, "loading VGGT model")
-
-        try:
-            import torch
-            from vggt.models.vggt import VGGT
-            from vggt.utils.load_fn import load_and_preprocess_images
-        except ImportError as e:
-            raise RuntimeError(
-                f"VGGT not installed: {e}. Run `pip install vggt` in the worker container, "
-                "or pick the `demo_fixture` backend to demo the pipeline without GPU."
-            ) from e
-
-        if torch.cuda.is_available():
-            device = "cuda"
-        elif torch.backends.mps.is_available():
-            device = "mps"
-        else:
-            raise RuntimeError(
-                "VGGT needs a CUDA or Apple-Metal GPU. None detected on this worker. "
-                "Pick the `demo_fixture` backend to demo without GPU."
-            )
-
-        progress_cb(0.10, f"using device: {device}")
+        settings = get_settings()
+        model_ref = settings.replicate_vggt_model
 
         frame_paths = sorted(inp.frames_dir.glob("*.jpg")) + sorted(inp.frames_dir.glob("*.png"))
         if not frame_paths:
             raise RuntimeError(f"no frames in {inp.frames_dir}")
-        progress_cb(0.15, f"loaded {len(frame_paths)} frames")
+        if len(frame_paths) > _MAX_FRAMES:
+            sel = np.linspace(0, len(frame_paths) - 1, _MAX_FRAMES).round().astype(int)
+            frame_paths = [frame_paths[i] for i in sorted(set(sel.tolist()))]
 
-        model = VGGT.from_pretrained("facebook/VGGT-1B").to(device).eval()
-        progress_cb(0.40, "running inference")
-
-        with torch.no_grad():
-            images = load_and_preprocess_images([str(p) for p in frame_paths]).to(device)
-            preds = model(images)
-
-        progress_cb(0.80, "extracting point cloud")
-        pts_world = preds["world_points"].squeeze(0).cpu().numpy().reshape(-1, 3)
-        # Cap to 200k points so trimesh stays snappy
-        if len(pts_world) > 200_000:
-            idx = np.random.choice(len(pts_world), 200_000, replace=False)
-            pts_world = pts_world[idx]
-
-        cloud = trimesh.PointCloud(pts_world)
-        pc_path = out_dir / "point_cloud.ply"
-        cloud.export(str(pc_path))
-
-        progress_cb(0.90, "meshing point cloud (ball-pivoting)")
+        progress_cb(0.10, f"uploading {len(frame_paths)} frames to {model_ref}")
+        files = rep.open_files(frame_paths)
         try:
-            import open3d as o3d  # type: ignore
+            progress_cb(0.20, "running VGGT on Replicate (cloud GPU)")
+            output = rep.run_model(
+                model_ref,
+                {
+                    "inputs": files,
+                    "to_base64": True,
+                    "return_pcd": True,
+                    "pcd_source": "point_head",
+                },
+            )
+        finally:
+            for f in files:
+                f.close()
 
-            pcd = o3d.geometry.PointCloud()
-            pcd.points = o3d.utility.Vector3dVector(pts_world)
-            pcd.estimate_normals()
-            distances = pcd.compute_nearest_neighbor_distance()
-            avg = float(np.mean(distances))
-            radii = o3d.utility.DoubleVector([avg * 2, avg * 3])
-            mesh_o3d = o3d.geometry.TriangleMesh.create_from_point_cloud_ball_pivoting(pcd, radii)
-            verts = np.asarray(mesh_o3d.vertices)
-            faces = np.asarray(mesh_o3d.triangles)
-            mesh = trimesh.Trimesh(vertices=verts, faces=faces)
-        except ImportError:
-            # No open3d — fall back to convex hull as the mesh
-            mesh = cloud.convex_hull
+        # Output: {"data": [uri per image], "point_cloud": uri}. Each data JSON
+        # carries base64 world_points (H,W,3), world_points_conf (H,W), image.
+        data_uris = output.get("data") if isinstance(output, dict) else None
+        if not data_uris:
+            raise RuntimeError(f"VGGT (Replicate) returned no per-image data: {output!r}")
+
+        progress_cb(0.55, f"downloading {len(data_uris)} world-point grids")
+        per_frame = []
+        for uri in data_uris:
+            d = rep.fetch_json(uri)
+            wp = rep.decode_array(d["world_points"])
+            conf = rep.decode_array(d["world_points_conf"])
+            img = _as_hw3_color(rep.decode_array(d["image"]))
+            per_frame.append((wp.astype(np.float32), conf.astype(np.float32), img))
+
+        # Confidence threshold + stride shared across frames so the whole-scan
+        # mesh stays viewer-loadable.
+        all_conf = np.concatenate([c.ravel() for _, c, _ in per_frame])
+        conf_thresh = float(np.quantile(all_conf, 0.30))
+        max_side = max(max(wp.shape[0], wp.shape[1]) for wp, _, _ in per_frame)
+        stride = max(1, -(-max_side // _MAX_GRID_SIDE))  # ceil division
+
+        progress_cb(0.70, "building mesh from world points")
+        all_v: list[np.ndarray] = []
+        all_f: list[np.ndarray] = []
+        all_c: list[np.ndarray] = []
+        offset = 0
+        n = len(per_frame)
+        for s, (wp, conf, img) in enumerate(per_frame):
+            v, f, c = _grid_to_mesh(wp, img, conf, conf_thresh=conf_thresh, stride=stride)
+            if f.shape[0]:
+                all_v.append(v)
+                all_c.append(c)
+                all_f.append(f + offset)
+                offset += v.shape[0]
+            progress_cb(0.70 + 0.25 * (s + 1) / n, f"meshing frame {s + 1}/{n}")
+
+        if not all_v:
+            raise RuntimeError("VGGT produced no confident geometry")
+        verts = np.concatenate(all_v, axis=0)
+        faces = np.concatenate(all_f, axis=0)
+        colors = np.concatenate(all_c, axis=0)
+
         mesh_path = out_dir / "mesh.ply"
-        mesh.export(str(mesh_path))
+        pc_path = out_dir / "point_cloud.ply"
+        trimesh.Trimesh(
+            vertices=verts.astype(np.float64), faces=faces,
+            vertex_colors=colors, process=False,
+        ).export(str(mesh_path))
+        trimesh.points.PointCloud(verts.astype(np.float64), colors=colors).export(str(pc_path))
 
         progress_cb(0.98, "done")
         return ReconstructionOutput(
@@ -133,8 +195,11 @@ class VGGTBackend(ReconstructionBackend):
             camera_poses=None,
             backend_meta={
                 "actual_backend": "vggt",
-                "device": device,
+                "device": "replicate-cloud",
+                "model": model_ref,
                 "n_frames": len(frame_paths),
-                "n_points": len(pts_world),
+                "vertices": int(verts.shape[0]),
+                "faces": int(faces.shape[0]),
+                "conf_thresh": conf_thresh,
             },
         )

@@ -32,6 +32,7 @@ import numpy as np
 import trimesh
 from PIL import Image
 
+from src.features.reconstruction.backends import _replicate as rep
 from src.features.reconstruction.backends import register
 from src.features.reconstruction.backends._geometry import (
     assume_intrinsics,
@@ -58,8 +59,15 @@ _GOOD_MATCHES = 500  # stop searching backward once a frame has this many matche
 _FOV_DEG_DEFAULT = 60.0
 _DISCONTINUITY_M = 0.30
 _RANSAC_ITERS = 200
-_RANSAC_THRESH_M = 0.15
+# 0.15m was too tight for room-scale metric depth — frames with 80+ valid
+# matched points still failed to find a consensus pose. 0.5m lets honest
+# correspondences survive monocular-depth noise while still rejecting outliers.
+_RANSAC_THRESH_M = 0.50
 _RANSAC_MIN_INLIERS = 10
+# Cap the back-projected grid's longer side. A full 1080×1920 frame is ~2M
+# verts; across a 24-frame scan that's a ~2GB PLY no viewer can load. Striding
+# to ≤ this many samples/side keeps the whole-scan mesh in the low-millions.
+_MAX_GRID_SIDE = 240
 
 
 def _sample_depth_at(depth: np.ndarray, kp: np.ndarray) -> np.ndarray:
@@ -100,8 +108,8 @@ def _write_ply_points(verts: np.ndarray, colors: np.ndarray, path: Path) -> None
 @register
 class DepthFusionBackend(ReconstructionBackend):
     name = "depth_fusion"
-    requires_gpu = True
-    implemented = True
+    requires_gpu = False  # depth runs on Replicate; only ONNX + numpy run locally
+    implemented = rep.replicate_available()
 
     def reconstruct(
         self,
@@ -134,7 +142,7 @@ class DepthFusionBackend(ReconstructionBackend):
             t_frame = time.time()
             img = Image.open(fp).convert("RGB")
             w, h = img.size
-            depth, _depth_meta = infer_depth(img, name=depth_model)
+            depth, _depth_meta = infer_depth(img, name=depth_model, fov_deg=fov_deg)
             if depth.shape != (h, w):
                 # Resize depth onto the image grid if the model emitted a different size.
                 depth = np.asarray(
@@ -214,12 +222,14 @@ class DepthFusionBackend(ReconstructionBackend):
                             )
 
             # Back-project this frame into world space and collect its mesh.
+            stride = max(1, -(-max(h, w) // _MAX_GRID_SIDE))  # ceil division
             verts, faces, colors = back_project(
                 depth=depth,
                 color=np.asarray(img),
                 intrinsics=K,
                 world_transform=world_T,
                 discontinuity_m=_DISCONTINUITY_M,
+                stride=stride,
             )
             if faces.shape[0] > 0:
                 all_verts.append(verts)

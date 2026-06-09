@@ -110,12 +110,20 @@ def back_project(
     intrinsics: np.ndarray,
     world_transform: np.ndarray | None = None,
     discontinuity_m: float = 0.3,
+    stride: int = 1,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Lift a depth grid to a colored triangle mesh.
 
     Returns (vertices Nx3, faces Mx3, colors Nx3 uint8). Faces are skipped at
     depth discontinuities (>= discontinuity_m between adjacent pixels) to
     avoid stretched ghost geometry around object edges.
+
+    `stride` subsamples the depth grid (every `stride`-th pixel in u and v)
+    before triangulation, cutting vertex count by ~stride². Sampled pixels keep
+    their TRUE pixel coordinates so `intrinsics` stays valid — a full-res
+    1080×1920 frame at stride=1 is ~2M verts/frame, unusable once concatenated
+    across a scan; callers pass a stride that caps the grid to a viewer-loadable
+    size.
 
     Coordinate convention: camera looks down +Z; X right, Y down (OpenCV).
     `intrinsics` is a 3x3 K matrix. If `world_transform` (4x4) is given,
@@ -127,12 +135,24 @@ def back_project(
         raise ValueError(f"color must be HxWx3, got {color.shape}")
     if color.shape[:2] != depth.shape:
         raise ValueError(f"color {color.shape[:2]} != depth {depth.shape}")
+    if stride < 1:
+        raise ValueError(f"stride must be >= 1, got {stride}")
 
-    H, W = depth.shape
     fx, fy = intrinsics[0, 0], intrinsics[1, 1]
     cx, cy = intrinsics[0, 2], intrinsics[1, 2]
 
-    us, vs = np.meshgrid(np.arange(W, dtype=np.float64), np.arange(H, dtype=np.float64))
+    if stride > 1:
+        u_idx = np.arange(0, depth.shape[1], stride)
+        v_idx = np.arange(0, depth.shape[0], stride)
+        depth = depth[np.ix_(v_idx, u_idx)]
+        color = color[np.ix_(v_idx, u_idx)]
+        us, vs = np.meshgrid(u_idx.astype(np.float64), v_idx.astype(np.float64))
+    else:
+        us, vs = np.meshgrid(
+            np.arange(depth.shape[1], dtype=np.float64),
+            np.arange(depth.shape[0], dtype=np.float64),
+        )
+    H, W = depth.shape
     z = depth.astype(np.float64)
     x = (us - cx) * z / fx
     y = (vs - cy) * z / fy

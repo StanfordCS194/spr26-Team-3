@@ -23,6 +23,16 @@ class Settings(BaseSettings):
     # Sentry — empty disables it
     sentry_dsn: str = ""
 
+    # Replicate — cloud GPU inference for reconstruction backends. Empty token
+    # disables all cloud backends (they report implemented=False). Models run
+    # remotely on Replicate's GPUs; the worker never loads them locally.
+    replicate_api_token: str = ""
+    replicate_vggt_model: str = "vufinder/vggt-1b"
+    replicate_depth_model: str = "vufinder/depth-anything-v3-metric"
+    replicate_colmap_model: str = "jimothyjohn/colmap"
+    # Gaussian-splatting trainer fed COLMAP poses + images (splat backend).
+    replicate_splat_model: str = ""
+
     # Build / RL defaults (exposed in the frontend's Advanced panel)
     default_target_diagonal_m: float = 6.0
     default_max_hulls: int = 64
