@@ -34,10 +34,6 @@ class Settings(BaseSettings):
     # Depth-Anything-3 metric depth — used by the depth_fusion_da3 backend as a
     # per-frame cloud depth front-end (Matthew's local depth_fusion is separate).
     replicate_depth_model: str = "vufinder/depth-anything-v3-metric"
-    # Gaussian-splatting trainer fed depth_fusion poses + init cloud (splat
-    # backend). Empty until a multi-view 3DGS trainer is hosted, which keeps the
-    # splat backend implemented=False.
-    replicate_splat_model: str = ""
 
     # Build / RL defaults (exposed in the frontend's Advanced panel)
     default_target_diagonal_m: float = 6.0

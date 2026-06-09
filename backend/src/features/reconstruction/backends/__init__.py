@@ -36,6 +36,5 @@ from src.features.reconstruction.backends import (  # noqa: E402, F401
     depth_fusion_da3,
     mapanything,
     pi3,
-    splat,
     vggt,
 )
