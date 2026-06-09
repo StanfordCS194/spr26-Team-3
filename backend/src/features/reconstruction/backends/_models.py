@@ -197,12 +197,21 @@ def match_lightglue(feat_a: dict, feat_b: dict, image_size: tuple[int, int]) -> 
     expected = {i.name for i in sess.get_inputs()}
     inputs = {k: v for k, v in inputs.items() if k in expected}
     out_names = [o.name for o in sess.get_outputs()]
-    outs = sess.run(out_names, inputs)
-    # The fabio-sim LightGlue ONNX exports `matches0` (1, M, 2) of (idx_a, idx_b).
-    matches = outs[0]
-    if matches.ndim == 3:
-        matches = matches[0]
-    return matches.astype(np.int64)
+    outs = dict(zip(out_names, sess.run(out_names, inputs)))
+    # The fabio-sim superpoint_lightglue ONNX returns `matches0` of shape
+    # (1, num_keypoints_a): for each keypoint in image A, the index of its
+    # matched keypoint in image B, or -1 if unmatched (LightGlue's learned
+    # threshold already filters weak matches). Convert that assignment array to
+    # explicit (idx_a, idx_b) pairs.
+    m0 = outs.get("matches0", next(iter(outs.values())))
+    m0 = np.asarray(m0)
+    while m0.ndim > 1:
+        m0 = m0[0]
+    idx_a = np.nonzero(m0 > -1)[0]
+    idx_b = m0[idx_a]
+    if idx_a.size == 0:
+        return np.zeros((0, 2), dtype=np.int64)
+    return np.stack([idx_a, idx_b], axis=1).astype(np.int64)
 
 
 __all__ = [

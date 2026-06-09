@@ -66,10 +66,13 @@ _DISCONTINUITY_M = 0.30
 _RANSAC_ITERS = 200
 _RANSAC_THRESH_M = 0.15
 _RANSAC_MIN_INLIERS = 10
-# Cap the meshing grid so a fused multi-frame mesh stays renderable in the
-# browser (a full-res 24-frame fuse is ~100M faces). Metric 3D points are
-# preserved when decimating — only the triangle density drops.
-_MESH_MAX_SIDE = 640
+# Cap the *total* meshing budget so a fused mesh stays renderable in the
+# browser regardless of frame count (a full-res 24-frame fuse is ~100M faces,
+# and even a per-frame 640px cap balloons to ~300MB at 24 frames). We spread a
+# fixed vertex budget across frames; metric 3D points are preserved when
+# decimating — only the triangle density drops.
+_MESH_VERT_BUDGET = 1_800_000  # total vertices across all frames
+_MESH_MIN_PIX = 20_000  # never decimate a single frame below this (≈170x118)
 
 
 def _sample_depth_at(depth: np.ndarray, kp: np.ndarray) -> np.ndarray:
@@ -91,10 +94,10 @@ def _kp_to_camera_points(kp: np.ndarray, z: np.ndarray, K: np.ndarray) -> np.nda
 
 
 def _downsample_for_mesh(
-    depth: np.ndarray, color: np.ndarray, fov_deg: float, max_side: int = _MESH_MAX_SIDE
+    depth: np.ndarray, color: np.ndarray, fov_deg: float, max_pixels: int
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Down-sample a (calibrated) depth map + color to ≤ max_side on the long
-    edge and return (depth_ds, color_ds, K_ds).
+    """Down-sample a (calibrated) depth map + color so the grid has at most
+    `max_pixels` cells, and return (depth_ds, color_ds, K_ds).
 
     The back-projected metric 3D points are unchanged because the intrinsics
     scale with resolution (fx, cx ∝ width); only the triangle grid coarsens.
@@ -102,7 +105,7 @@ def _downsample_for_mesh(
     discontinuity filter; color uses bilinear.
     """
     h, w = depth.shape
-    s = min(1.0, float(max_side) / float(max(w, h)))
+    s = min(1.0, (float(max_pixels) / float(w * h)) ** 0.5)
     if s < 1.0:
         new_w = max(2, int(round(w * s)))
         new_h = max(2, int(round(h * s)))
@@ -172,6 +175,9 @@ class DepthFusionBackend(ReconstructionBackend):
             depth_model = "indoor"
 
         n = len(frame_paths)
+        # Spread the total vertex budget across frames so the fused mesh stays
+        # renderable whether there are 1 or 24 of them.
+        mesh_max_pixels = max(_MESH_MIN_PIX, _MESH_VERT_BUDGET // n)
 
         # ---- Pass 1: per-frame depth + SuperPoint features + FOV estimate ----
         frames: list[dict] = []
@@ -290,7 +296,7 @@ class DepthFusionBackend(ReconstructionBackend):
                             )
 
             # Back-project this frame into world space on a decimated grid.
-            depth_ds, color_ds, K_ds = _downsample_for_mesh(depth, fr["color"], fov_deg)
+            depth_ds, color_ds, K_ds = _downsample_for_mesh(depth, fr["color"], fov_deg, mesh_max_pixels)
             verts, faces, colors = back_project(
                 depth=depth_ds,
                 color=color_ds,
