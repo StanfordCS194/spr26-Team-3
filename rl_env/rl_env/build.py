@@ -116,23 +116,73 @@ def preprocess(mesh: trimesh.Trimesh, cfg: BuildConfig) -> tuple[trimesh.Trimesh
 # ---------------------------------------------------------------------------
 
 
+# A reconstruction mesh can be millions of faces; coarse collision geometry
+# doesn't need that, and the heavy ops below choke on it. Decimate first.
+_COLLISION_MAX_FACES = 120_000
+
+
+def _decimate_for_collision(mesh: trimesh.Trimesh, max_faces: int = _COLLISION_MAX_FACES) -> trimesh.Trimesh:
+    """Best-effort reduce face count before decomposition. If no decimation
+    backend is available, return the mesh unchanged — the component fallback
+    below is memory-safe either way."""
+    if len(mesh.faces) <= max_faces:
+        return mesh
+    try:
+        out = mesh.simplify_quadric_decimation(face_count=max_faces)
+        if out is not None and len(out.faces) > 0:
+            return out
+    except Exception:
+        pass
+    return mesh
+
+
+def _largest_components(mesh: trimesh.Trimesh, k: int) -> list[trimesh.Trimesh]:
+    """Up to `k` largest connected components, materialised one at a time.
+
+    Avoids `mesh.split()` — which builds a full Trimesh for *every* component,
+    OOMing on a back-projected mesh with thousands of tiny noise islands. We
+    label components cheaply (face adjacency) and only copy out the biggest few.
+    """
+    nf = len(mesh.faces)
+    if nf == 0:
+        return [mesh]
+    try:
+        from trimesh.graph import connected_components
+
+        comps = connected_components(mesh.face_adjacency, min_len=1, nodes=np.arange(nf))
+    except Exception:
+        return [mesh]
+    comps = sorted(comps, key=len, reverse=True)[: max(k, 1)]
+    out: list[trimesh.Trimesh] = []
+    for fi in comps:
+        try:
+            out.append(mesh.submesh([fi], append=True, repair=False))
+        except Exception:
+            pass
+    return out or [mesh]
+
+
 def decompose(mesh: trimesh.Trimesh, cfg: BuildConfig) -> list[trimesh.Trimesh]:
     """Return a list of convex hull meshes covering `mesh`.
 
     Strategy:
-      1. If trimesh has a working VHACD/CoACD backend, use it.
-      2. Else split into connected components and take convex hull of each.
-      3. If that yields too few hulls (e.g. one big merged mesh), fall back to
-         a single convex hull of the entire scene — coarse but always works.
+      1. Decimate huge meshes (coarse collision geometry needs few faces).
+      2. If trimesh has a working VHACD/CoACD backend, use it.
+      3. Else take convex hulls of the largest connected components.
+      4. If that yields nothing, a single convex hull of the whole scene.
 
     The MVP intentionally accepts coarse collision geometry; tightening this
     is a known follow-up (PRD: "balance collision fidelity against simulation
     speed", Key technical challenge #1).
     """
-    if cfg.decompose:
+    work = _decimate_for_collision(mesh)
+
+    # Only attempt VHACD if the mesh is a sane size — it's slow/heavy on a
+    # multi-million-face mesh, and the component fallback is always safe.
+    if cfg.decompose and len(work.faces) <= _COLLISION_MAX_FACES * 4:
         try:
             hulls = trimesh.decomposition.convex_decomposition(
-                mesh, maxNumVerticesPerCH=64, resolution=100_000
+                work, maxNumVerticesPerCH=64, resolution=100_000
             )
             if hulls:
                 hulls = [h for h in hulls if h.is_volume and h.volume > 1e-6]
@@ -141,12 +191,8 @@ def decompose(mesh: trimesh.Trimesh, cfg: BuildConfig) -> list[trimesh.Trimesh]:
         except Exception:
             pass
 
-    components = mesh.split(only_watertight=False)
-    if len(components) == 0:
-        components = [mesh]
-
     hulls: list[trimesh.Trimesh] = []
-    for c in components[: cfg.max_hulls]:
+    for c in _largest_components(work, cfg.max_hulls):
         try:
             h = c.convex_hull
             if h.is_volume and h.volume > 1e-6:
@@ -155,7 +201,10 @@ def decompose(mesh: trimesh.Trimesh, cfg: BuildConfig) -> list[trimesh.Trimesh]:
             continue
 
     if not hulls:
-        hulls = [mesh.convex_hull]
+        try:
+            hulls = [work.convex_hull]
+        except Exception:
+            hulls = [mesh.convex_hull]
 
     return hulls
 
