@@ -45,7 +45,12 @@ def _client():
         raise RuntimeError(
             f"replicate SDK not installed: {e}. Run `uv sync` in backend/."
         ) from e
-    return replicate.Client(api_token=token)
+    # Long read timeout: a cold model boots on first call (download + load),
+    # which can exceed httpx's default and raise ReadTimeout mid-prediction.
+    return replicate.Client(
+        api_token=token,
+        timeout=httpx.Timeout(600.0, connect=15.0),
+    )
 
 
 def run_model(model_ref: str, inputs: dict[str, Any]) -> Any:
