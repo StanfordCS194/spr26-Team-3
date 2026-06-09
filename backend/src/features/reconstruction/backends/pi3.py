@@ -1,9 +1,9 @@
-"""VGGT — feed-forward neural reconstruction on Replicate (cloud GPU).
+"""π³ (pi3) — feed-forward multi-view reconstruction on Replicate (cloud GPU).
 
-Ships frames to `vufinder/vggt-1b` (L40S) and meshes the returned world-point
-grids locally. Scale-invariant output. The shared pipeline lives in
-`_feedforward.py`; this is a thin wrapper that names the model. Reports
-`implemented` only when a Replicate token is configured.
+`vufinder/map-anything-pi3`. A VGGT successor: permutation-equivariant (no
+reference-frame dependence), so it's more stable across frame ordering.
+Scale-invariant output. Same `inputs`→world-points envelope as VGGT — meshing
+is shared via `_feedforward.py`.
 """
 from __future__ import annotations
 
@@ -22,9 +22,9 @@ from src.features.reconstruction.backends.base import (
 
 
 @register
-class VGGTBackend(ReconstructionBackend):
-    name = "vggt"
-    requires_gpu = False  # inference runs on Replicate's GPU, not the worker
+class Pi3Backend(ReconstructionBackend):
+    name = "pi3"
+    requires_gpu = False  # inference runs on Replicate's GPU
     implemented = rep.replicate_available()
 
     def reconstruct(
@@ -34,5 +34,5 @@ class VGGTBackend(ReconstructionBackend):
         progress_cb: Callable[[float, str], None],
     ) -> ReconstructionOutput:
         return run_feedforward(
-            get_settings().replicate_vggt_model, "vggt", inp, out_dir, progress_cb
+            get_settings().replicate_pi3_model, "pi3", inp, out_dir, progress_cb
         )

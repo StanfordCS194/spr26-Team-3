@@ -1,9 +1,10 @@
-"""VGGT — feed-forward neural reconstruction on Replicate (cloud GPU).
+"""MapAnything — feed-forward METRIC multi-view reconstruction on Replicate.
 
-Ships frames to `vufinder/vggt-1b` (L40S) and meshes the returned world-point
-grids locally. Scale-invariant output. The shared pipeline lives in
-`_feedforward.py`; this is a thin wrapper that names the model. Reports
-`implemented` only when a Replicate token is configured.
+`vufinder/map-anything` (Meta). Unlike VGGT/π³ (scale-invariant), MapAnything
+outputs real-world metric scale — useful when the reconstruction feeds a
+physics/RL sim. Same `inputs`→world-points envelope as VGGT; meshing is shared
+via `_feedforward.py` (its discontinuity cutoff is percentile-based, so it
+handles metric output without special-casing).
 """
 from __future__ import annotations
 
@@ -22,9 +23,9 @@ from src.features.reconstruction.backends.base import (
 
 
 @register
-class VGGTBackend(ReconstructionBackend):
-    name = "vggt"
-    requires_gpu = False  # inference runs on Replicate's GPU, not the worker
+class MapAnythingBackend(ReconstructionBackend):
+    name = "mapanything"
+    requires_gpu = False  # inference runs on Replicate's GPU
     implemented = rep.replicate_available()
 
     def reconstruct(
@@ -34,5 +35,5 @@ class VGGTBackend(ReconstructionBackend):
         progress_cb: Callable[[float, str], None],
     ) -> ReconstructionOutput:
         return run_feedforward(
-            get_settings().replicate_vggt_model, "vggt", inp, out_dir, progress_cb
+            get_settings().replicate_mapanything_model, "mapanything", inp, out_dir, progress_cb
         )

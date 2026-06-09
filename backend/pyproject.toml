@@ -38,6 +38,11 @@ dependencies = [
     "torchvision>=0.17",
     "onnxruntime>=1.20",
 
+    # cloud GPU inference for reconstruction backends (Replicate). Heavy models
+    # (VGGT, Depth-Anything, COLMAP, gaussian-splatting) run remotely, never on
+    # the dev laptop — see backends/_replicate.py.
+    "replicate>=1.0",
+
     # observability
     "sentry-sdk[fastapi]>=2.18",
 
