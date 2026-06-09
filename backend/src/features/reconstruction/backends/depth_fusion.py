@@ -336,6 +336,14 @@ class DepthFusionBackend(ReconstructionBackend):
         colors = np.concatenate(all_colors, axis=0)
         faces = np.concatenate(all_faces, axis=0)
 
+        # back_project works in OpenCV camera axes (X right, Y down, Z forward).
+        # The viewer and the downstream physics build both expect Y up, so flip
+        # the whole scene into that convention (matches prototype/v4.2). Negating
+        # Y *and* Z is a 180° rotation about X — it preserves face winding, so no
+        # normals/winding fix is needed.
+        verts[:, 1] *= -1.0
+        verts[:, 2] *= -1.0
+
         mesh_path = out_dir / "mesh.ply"
         points_path = out_dir / "points.ply"
         _write_ply_mesh(verts, faces, colors, mesh_path)
