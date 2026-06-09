@@ -24,35 +24,99 @@ class CheckResult:
     fix: str
 
 
+# ---------------------------------------------------------- component analysis
+#
+# A back-projected reconstruction is often millions of faces split into
+# thousands of tiny disconnected "noise islands". `mesh.split()` materialises a
+# full Trimesh *per component*, which exhausts memory and hangs/kills the
+# process. Instead we label components cheaply with face-adjacency (scipy) and
+# only materialise the largest few to run the per-component watertight / hull
+# tests. The three split-based checks read this precomputed summary.
+
+_MAX_SUBMESHES = 48  # cap how many of the largest components we copy out
+
+
+@dataclass
+class _Components:
+    count: int            # total number of connected components
+    face_sizes: list[int]  # face count per component (all of them — cheap)
+    sampled: int          # how many of the largest were materialised
+    closed: int           # of those sampled, how many are watertight
+    hull_vol: float       # summed convex-hull volume of the sampled components
+    mesh_vol: float       # |mesh.volume|
+
+
+def _analyze_components(mesh: trimesh.Trimesh) -> _Components:
+    """Connected-component stats WITHOUT mesh.split() (which copies a full
+    Trimesh per component → OOM on a multi-million-face reconstruction).
+    Best-effort: never raises."""
+    nf = len(mesh.faces)
+    if nf == 0:
+        return _Components(0, [], 0, 0, 0.0, 0.0)
+    try:
+        from trimesh.graph import connected_components
+
+        comps = connected_components(
+            mesh.face_adjacency, min_len=1, nodes=np.arange(nf)
+        )
+    except Exception:
+        # Fall back to treating the whole mesh as a single component.
+        comps = [np.arange(nf)]
+
+    face_sizes = [int(len(c)) for c in comps]
+    order = np.argsort(face_sizes)[::-1][:_MAX_SUBMESHES]  # largest first
+    closed = 0
+    hull_vol = 0.0
+    for i in order:
+        try:
+            sub = mesh.submesh([comps[i]], append=True, repair=False)
+            if sub.is_watertight:
+                closed += 1
+            hull_vol += abs(float(sub.convex_hull.volume))
+        except Exception:
+            pass
+    try:
+        mesh_vol = abs(float(mesh.volume))
+    except Exception:
+        mesh_vol = 0.0
+    return _Components(len(comps), face_sizes, int(len(order)), closed, hull_vol, mesh_vol)
+
+
+def _components(mesh: trimesh.Trimesh) -> _Components:
+    cached = mesh.metadata.get("_wv_comps") if hasattr(mesh, "metadata") else None
+    return cached if isinstance(cached, _Components) else _analyze_components(mesh)
+
+
 # ---------------------------------------------------------- watertight
 
 def check_watertight(mesh: trimesh.Trimesh) -> CheckResult:
     """Watertightness for a multi-part scene is measured per component. A
     scene of N closed boxes is "watertight enough" even though the union
     isn't a single closed surface."""
-    parts = mesh.split(only_watertight=False)
-    if not parts:
+    comps = _components(mesh)
+    if comps.count == 0:
         return CheckResult("watertight", "fail", "empty mesh", "no faces to analyze")
-    closed = sum(1 for p in parts if p.is_watertight)
-    ratio = closed / len(parts)
+    denom = max(comps.sampled, 1)  # measured over the largest components
+    closed = comps.closed
+    ratio = closed / denom
     if ratio >= 0.95:
         return CheckResult(
             "watertight",
             "pass",
-            f"{closed}/{len(parts)} components are closed",
+            f"{closed}/{denom} largest components are closed",
             "",
         )
     if ratio >= 0.5:
         return CheckResult(
             "watertight",
             "warn",
-            f"only {closed}/{len(parts)} components closed",
+            f"only {closed}/{denom} largest components closed",
             "Half-open meshes still work for navigation but the agent can wander past open faces.",
         )
     return CheckResult(
         "watertight",
         "warn",
-        f"{closed}/{len(parts)} components closed — open/partial scan",
+        f"{closed}/{denom} largest components closed — open/partial scan",
         "Partial captures (e.g. half a room) are open at the back. Build wraps "
         "the scene in invisible boundary walls so the agent stays inside; "
         "multi-frame video or LiDAR gives a more complete mesh.",
@@ -66,12 +130,12 @@ def check_connected_components(mesh: trimesh.Trimesh) -> CheckResult:
     its own watertight box). The signal we want: is there ONE dominant
     component, or is the mesh shattered into uniform small pieces?
     """
-    parts = mesh.split(only_watertight=False)
-    n = len(parts)
+    comps = _components(mesh)
+    n = comps.count
     if n <= 1:
         return CheckResult("connected_components", "pass", "single connected mesh", "")
 
-    sizes = sorted((len(p.faces) for p in parts), reverse=True)
+    sizes = sorted(comps.face_sizes, reverse=True)
     largest_share = sizes[0] / max(sum(sizes), 1)
 
     if largest_share >= 0.5 or n <= 20:
@@ -181,22 +245,16 @@ def check_convex_decomp_quality(mesh: trimesh.Trimesh) -> CheckResult:
     """Decompose into convex components (per-connected-component hulls) and
     check volume preservation. VHACD would be more accurate; we use the
     simpler fallback that rl_env.build also uses by default."""
-    parts = mesh.split(only_watertight=False)
-    n_hulls = len(parts)
+    comps = _components(mesh)
+    n_hulls = comps.count
     if n_hulls == 0:
         return CheckResult("convex_decomp_quality", "fail", "no hulls produced", "empty mesh")
 
-    try:
-        original_vol = abs(float(mesh.volume))
-    except Exception:
-        original_vol = 0.0
-    hull_vol = 0.0
-    for p in parts:
-        try:
-            hull_vol += abs(float(p.convex_hull.volume))
-        except Exception:
-            pass
-
+    # hull_vol is summed over the largest sampled components; for open
+    # reconstructions mesh.volume is ~0 so vol_ratio defaults to 1.0 and the
+    # hull-count thresholds drive the verdict.
+    original_vol = comps.mesh_vol
+    hull_vol = comps.hull_vol
     vol_ratio = hull_vol / max(original_vol, 1e-6) if original_vol > 1e-3 else 1.0
 
     if 3 <= n_hulls <= 64 and vol_ratio >= 0.7:
@@ -278,6 +336,12 @@ def run_all(mesh_path: str | Path) -> dict:
             "overall": "fail",
             "error": f"could not load mesh as trimesh.Trimesh (got {type(mesh).__name__})",
         }
+    # Analyse connected components ONCE (memory-bounded) and cache it so the
+    # split-based checks don't each re-walk a multi-million-face mesh.
+    try:
+        mesh.metadata["_wv_comps"] = _analyze_components(mesh)
+    except Exception:
+        pass
     results = [check(mesh) for check in CATALOG.values()]
     statuses = {r.status for r in results}
     overall = "fail" if "fail" in statuses else ("warn" if "warn" in statuses else "pass")
