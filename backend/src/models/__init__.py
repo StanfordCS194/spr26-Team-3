@@ -7,7 +7,9 @@ from datetime import datetime
 
 from nanoid import generate as nanoid
 from sqlalchemy import Boolean, Float, ForeignKey, Integer, String, Text
-from sqlalchemy.dialects.postgresql import JSONB
+# Portable JSON (works on Postgres and SQLite). Aliased as JSONB so the rest of
+# the module is unchanged; local host runs use SQLite.
+from sqlalchemy import JSON as JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 

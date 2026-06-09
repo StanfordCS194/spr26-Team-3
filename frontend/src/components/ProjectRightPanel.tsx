@@ -11,8 +11,18 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useMatches } from "@tanstack/react-router";
 
-import { IDENTITY_PLACEMENT, MeshViewer, type Placement } from "@/components/MeshViewer";
-import { useApplyReconstructionTransform, useLatestReconstruction } from "@/lib/api";
+import { IDENTITY_PLACEMENT, MeshViewer, type Placement, type RobotReplay } from "@/components/MeshViewer";
+import {
+  useApplyReconstructionTransform,
+  useComparePolicies,
+  useLatestReconstruction,
+  useProjectState,
+} from "@/lib/api";
+
+// Two policies, two balls. Amber = greedy (heads straight at the goal, stalls
+// on obstacles); blue = the trained PPO (routes around them).
+const GREEDY_COLOR = 0xeec24a;
+const PPO_COLOR = 0x4a9eee;
 
 export function ProjectRightPanel() {
   const matches = useMatches();
@@ -24,12 +34,15 @@ export function ProjectRightPanel() {
       m.routeId.startsWith("/p/$projectId"),
   );
   const projectId = (projectMatch?.params as { projectId?: string } | undefined)?.projectId;
+  const onReplay = matches.some(
+    (m) => typeof m.routeId === "string" && m.routeId.endsWith("/replay"),
+  );
 
   if (!projectId) {
     return null;
   }
 
-  return <RightPaneForProject projectId={projectId} />;
+  return <RightPaneForProject projectId={projectId} onReplay={onReplay} />;
 }
 
 function isIdentity(p: Placement): boolean {
@@ -40,13 +53,47 @@ function isIdentity(p: Placement): boolean {
   );
 }
 
-function RightPaneForProject({ projectId }: { projectId: string }) {
+function RightPaneForProject({ projectId, onReplay }: { projectId: string; onReplay: boolean }) {
   const { data: recon } = useLatestReconstruction(projectId);
   const apply = useApplyReconstructionTransform(projectId);
 
   const [placement, setPlacement] = useState<Placement>(IDENTITY_PLACEMENT);
   const [meshBump, setMeshBump] = useState(0);
   const matrixRef = useRef<number[]>([]);
+
+  // On the Replay stage, race greedy vs the trained PPO on ONE sensible fixed
+  // track (the backend picks the most instructive seed — an obstacle in the
+  // way) and drive BOTH as balls through the textured mesh. The compare result
+  // carries the build's raw→sim transform so each path maps back onto the floor.
+  const { data: state } = useProjectState(projectId);
+  const canPPO = state?.train.complete ?? false;
+  const compare = useComparePolicies(projectId);
+
+  // Kick off the race once, when we land on Replay with a trained policy.
+  const comparedRef = useRef(false);
+  useEffect(() => {
+    comparedRef.current = false;
+  }, [projectId]);
+  useEffect(() => {
+    if (onReplay && canPPO && !comparedRef.current && !compare.isPending && !compare.data) {
+      comparedRef.current = true;
+      compare.mutate({});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onReplay, canPPO]);
+
+  const cmp = compare.data;
+  const robots: RobotReplay[] =
+    onReplay && cmp && cmp.raw_to_sim
+      ? cmp.results.map((r) => ({
+          key: `${cmp.seed}-${r.policy}`,
+          color: r.policy === "ppo" ? PPO_COLOR : GREEDY_COLOR,
+          points: (r.trajectory ?? []).map((p) => ({ x: p.x, y: p.y })),
+          goal: r.goal ? { x: r.goal[0], y: r.goal[1] } : undefined,
+          rawToSim: cmp.raw_to_sim!,
+          floorZ: cmp.floor_z ?? 0,
+        }))
+      : [];
 
   const status = recon?.status;
   const reconId = recon?.id;
@@ -82,6 +129,7 @@ function RightPaneForProject({ projectId }: { projectId: string }) {
             onMatrix={(m) => {
               matrixRef.current = m;
             }}
+            robots={robots}
           />
         ) : (
           <div className="w-full h-full border border-dashed border-border/60 rounded-sm flex items-center justify-center text-center px-6 text-xs mono">
@@ -103,7 +151,36 @@ function RightPaneForProject({ projectId }: { projectId: string }) {
         )}
       </div>
 
-      {meshUrl && (
+      {meshUrl && onReplay && (
+        <div className="border border-border rounded-sm p-2.5 text-[11px] mono text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1">
+          {robots.length ? (
+            <>
+              <span className="flex items-center gap-1.5">
+                <span className="inline-block w-2 h-2 rounded-full bg-[#eec24a]" /> greedy
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="inline-block w-2 h-2 rounded-full bg-[#4a9eee]" /> PPO
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="inline-block w-2 h-2 rounded-full bg-[#ff5a3c]" /> goal
+              </span>
+              <span className="text-muted-foreground/70">· same start → goal, on the floor</span>
+            </>
+          ) : compare.isPending ? (
+            <span className="animate-pulse">picking a sensible track and racing both policies…</span>
+          ) : !canPPO ? (
+            <span>train a PPO policy to race it against greedy here</span>
+          ) : compare.isError ? (
+            <span className="text-[var(--status-fail)]">
+              {String((compare.error as Error).message)}
+            </span>
+          ) : (
+            <span>preparing the head-to-head…</span>
+          )}
+        </div>
+      )}
+
+      {meshUrl && !onReplay && (
         <PlacementControls
           placement={placement}
           onChange={setPlacement}

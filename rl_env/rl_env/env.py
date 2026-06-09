@@ -34,6 +34,14 @@ class TaskConfig:
     min_start_goal_dist: float = 1.5
     max_start_goal_dist: float | None = None
     seed: int | None = None
+    fixed_spawn: tuple[float, float] | None = None
+    """Exact start (x, y). Overrides spawn_region sampling for the agent."""
+    fixed_goal: tuple[float, float] | None = None
+    """Exact goal (x, y). Overrides spawn_region sampling for the goal."""
+    spawn_cells: list[tuple[float, float]] | None = None
+    """Walkable floor cells (x, y). When set, start/goal are sampled from these
+    instead of the spawn_region box — keeps episodes on the scanned floor of a
+    partial reconstruction rather than the empty corners of its bounding box."""
 
 
 class NavEnv(gym.Env):
@@ -136,16 +144,40 @@ class NavEnv(gym.Env):
         min_dist = float(max(0.0, self.task.min_start_goal_dist))
         max_dist = self.task.max_start_goal_dist
 
-        agent = self.np_random.uniform([xmin, ymin], [xmax, ymax])
-        goal = self.np_random.uniform([xmin, ymin], [xmax, ymax])
-        for _ in range(64):
-            agent = self.np_random.uniform([xmin, ymin], [xmax, ymax])
-            goal = self.np_random.uniform([xmin, ymin], [xmax, ymax])
-            dist = float(np.linalg.norm(agent - goal))
-            if dist < min_dist:
-                continue
-            if max_dist is not None and dist > max_dist:
-                continue
+        cells = (
+            np.asarray(self.task.spawn_cells, dtype=float)
+            if self.task.spawn_cells is not None and len(self.task.spawn_cells) >= 2
+            else None
+        )
+
+        def _sample() -> np.ndarray:
+            if cells is not None:
+                c = cells[self.np_random.integers(len(cells))]
+                return c + self.np_random.uniform(-0.06, 0.06, size=2)
+            return self.np_random.uniform([xmin, ymin], [xmax, ymax])
+
+        if self.task.fixed_spawn is not None and self.task.fixed_goal is not None:
+            agent = np.asarray(self.task.fixed_spawn, dtype=float)
+            goal = np.asarray(self.task.fixed_goal, dtype=float)
+        else:
+            agent = _sample()
+            goal = _sample()
+            for _ in range(64):
+                agent = (
+                    np.asarray(self.task.fixed_spawn, dtype=float)
+                    if self.task.fixed_spawn is not None
+                    else _sample()
+                )
+                goal = (
+                    np.asarray(self.task.fixed_goal, dtype=float)
+                    if self.task.fixed_goal is not None
+                    else _sample()
+                )
+                dist = float(np.linalg.norm(agent - goal))
+                if dist < min_dist:
+                    continue
+                if max_dist is not None and dist > max_dist:
+                    continue
                 break
 
         self.data.qpos[self._agent_x_qpos] = agent[0]

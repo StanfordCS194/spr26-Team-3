@@ -69,6 +69,7 @@ async def queue_reconstruction(
     project: ProjectDep,
     body: ReconstructionRequest,
     db: DbSession,
+    background_tasks: BackgroundTasks,
 ) -> Reconstruction:
     if not project.video_path:
         raise HTTPException(400, "no video uploaded — POST /upload-video first")
@@ -90,21 +91,12 @@ async def queue_reconstruction(
     db.commit()
     db.refresh(recon)
 
-    # Inngest is the single source of truth now. The durable function in
-    # backend/src/features/reconstruction/inngest_functions.py picks up
-    # the event, runs extract_frames → run_backend → persist, and writes
-    # the row's status from pending → ok/failed.
-    await inngest_client.send(
-        events=[
-            inngest.Event(
-                name="reconstruction/requested",
-                data={
-                    "reconstruction_id": recon.id,
-                    "backend": backend_name,
-                    "params": body.params,
-                },
-            )
-        ]
+    # Local host mode (no Inngest/docker): run the in-process worker as a
+    # FastAPI background task. `_run_reconstruction_blocking` is sync, so
+    # FastAPI runs it in a threadpool; the row's status moves
+    # pending → running → ok/failed while the frontend polls.
+    background_tasks.add_task(
+        _run_reconstruction_blocking, recon.id, backend_name, body.params
     )
 
     return recon

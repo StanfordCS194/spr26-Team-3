@@ -50,16 +50,29 @@ function placementMatrix(p: Placement, center: THREE.Vector3): THREE.Matrix4 {
     .multiply(toOrigin);
 }
 
+/** One agent to animate inside the mesh: sim-frame trajectory + the build's
+ *  raw-mesh→sim 4×4 transform (so we can map points back onto the mesh). */
+export type RobotReplay = {
+  key: string;
+  color: number; // three.js hex
+  points: { x: number; y: number }[];
+  goal?: { x: number; y: number }; // true goal (paths stop at the success radius)
+  rawToSim: number[][];
+  floorZ: number;
+};
+
 export function MeshViewer({
   url,
   className,
   placement = IDENTITY_PLACEMENT,
   onMatrix,
+  robots = [],
 }: {
   url: string;
   className?: string;
   placement?: Placement;
   onMatrix?: (elements: number[]) => void;
+  robots?: RobotReplay[];
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [load, setLoad] = useState<LoadState>({ state: "loading" });
@@ -70,6 +83,21 @@ export function MeshViewer({
   const applyPlacementRef = useRef<(() => void) | null>(null);
   const onMatrixRef = useRef(onMatrix);
   onMatrixRef.current = onMatrix;
+  const robotsPropRef = useRef(robots);
+  robotsPropRef.current = robots;
+  const applyRobotRef = useRef<(() => void) | null>(null);
+  const robotsRef = useRef<
+    Array<{
+      points: THREE.Vector3[];
+      robot: THREE.Mesh;
+      frame: number;
+      maxLen: number;
+      speed: number;
+      pauseEnd: number;
+      radius: number;
+      up: THREE.Vector3;
+    }>
+  >([]);
 
   // Scene setup + mesh load — re-runs only when the URL changes.
   useEffect(() => {
@@ -113,6 +141,16 @@ export function MeshViewer({
     envGroup.matrixAutoUpdate = false;
     scene.add(envGroup);
 
+    // Robot + path live inside envGroup so the placement transform applies to
+    // them exactly like the mesh — they stay glued to the scanned room.
+    const robotGroup = new THREE.Group();
+    envGroup.add(robotGroup);
+
+    // Held so applyRobots() can fade the room to a translucent "dollhouse" while
+    // robots are navigating (so you can see them inside a closed scan), and
+    // restore it to solid for the placement-editing stage.
+    let meshMat: THREE.MeshStandardMaterial | null = null;
+
     const loader = new PLYLoader();
     loader.load(
       url,
@@ -134,6 +172,7 @@ export function MeshViewer({
           side: THREE.DoubleSide,
           vertexColors: !!geom.getAttribute("color"),
         });
+        meshMat = material;
         const mesh = new THREE.Mesh(geom, material);
         envGroup.add(mesh);
         envRef.current = { group: envGroup, center };
@@ -147,6 +186,7 @@ export function MeshViewer({
         controls.update();
 
         applyPlacement();
+        applyRobots();
         setLoad({ state: "ready" });
       },
       undefined,
@@ -167,10 +207,130 @@ export function MeshViewer({
     }
     applyPlacementRef.current = applyPlacement;
 
+    // Build one rolling ball + path per agent, mapping each sim-frame
+    // trajectory back into raw-mesh coordinates via the inverse raw→sim
+    // transform. All agents share the same start→goal (the compared config).
+    function applyRobots() {
+      while (robotGroup.children.length) {
+        const c = robotGroup.children.pop() as THREE.Mesh | THREE.Line;
+        (c as THREE.Mesh).geometry?.dispose?.();
+        const mat = (c as THREE.Mesh).material as THREE.Material | undefined;
+        mat?.dispose?.();
+      }
+      robotsRef.current = [];
+      // Fade the room while robots navigate so they're visible inside a closed
+      // scan; restore it solid when there are none (placement-editing stage).
+      const hasRobots = (robotsPropRef.current ?? []).some((r) => r?.points?.length);
+      if (meshMat) {
+        meshMat.transparent = hasRobots;
+        meshMat.opacity = hasRobots ? 0.45 : 1;
+        meshMat.depthWrite = !hasRobots;
+        meshMat.needsUpdate = true;
+      }
+      const agents = (robotsPropRef.current ?? []).filter(
+        (r) => r?.points?.length && r.rawToSim?.length === 4,
+      );
+      let goalDone = false;
+      let ai = 0;
+      for (const rp of agents) {
+        const m = rp.rawToSim;
+        const M = new THREE.Matrix4().set(
+          m[0][0], m[0][1], m[0][2], m[0][3],
+          m[1][0], m[1][1], m[1][2], m[1][3],
+          m[2][0], m[2][1], m[2][2], m[2][3],
+          m[3][0], m[3][1], m[3][2], m[3][3],
+        );
+        const simToRaw = M.clone().invert();
+        const sc = new THREE.Vector3().setFromMatrixScale(simToRaw);
+        const up = new THREE.Vector3(0, 0, 1).transformDirection(simToRaw).normalize();
+        // Physical agent radius is ~0.08m; render a touch larger (roomba-scale)
+        // so both balls read clearly inside the room. Rest them on the floor.
+        const VIS_R = 0.13;
+        const robotR = Math.max(0.02, VIS_R * sc.x);
+        const zRobot = rp.floorZ + VIS_R + 0.01;
+        // Both policies share the same start→goal, so their paths often nearly
+        // coincide. Slide each into its own lane (offset perpendicular to the
+        // start→goal line, in the floor plane) so both balls stay distinct.
+        const first = rp.points[0];
+        const last = rp.points[rp.points.length - 1];
+        let nx = -(last.y - first.y);
+        let ny = last.x - first.x;
+        const nlen = Math.hypot(nx, ny) || 1;
+        nx /= nlen;
+        ny /= nlen;
+        const lane = (ai - (agents.length - 1) / 2) * (VIS_R * 1.7);
+        const pts = rp.points.map((p) =>
+          new THREE.Vector3(p.x + nx * lane, p.y + ny * lane, zRobot).applyMatrix4(simToRaw),
+        );
+        ai += 1;
+        robotGroup.add(
+          new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints(pts),
+            new THREE.LineBasicMaterial({ color: rp.color, transparent: true, opacity: 0.9 }),
+          ),
+        );
+        if (!goalDone) {
+          const goal = new THREE.Mesh(
+            new THREE.SphereGeometry(robotR * 1.0, 16, 12),
+            new THREE.MeshStandardMaterial({ color: 0xff5a3c, emissive: 0xff3a1e, emissiveIntensity: 0.6 }),
+          );
+          // Shared goal: the TRUE goal position (paths stop at the success
+          // radius, short of it), on the centerline (no lane offset).
+          const g = rp.goal ?? last;
+          goal.position.copy(new THREE.Vector3(g.x, g.y, zRobot).applyMatrix4(simToRaw));
+          robotGroup.add(goal);
+          goalDone = true;
+        }
+        const robotMesh = new THREE.Mesh(
+          new THREE.SphereGeometry(robotR, 24, 18),
+          new THREE.MeshStandardMaterial({ color: rp.color, emissive: rp.color, emissiveIntensity: 0.6 }),
+        );
+        const cap = new THREE.Mesh(
+          new THREE.SphereGeometry(robotR * 0.42, 10, 8),
+          new THREE.MeshStandardMaterial({ color: 0x111111 }),
+        );
+        cap.position.set(0, 0, robotR * 0.82);
+        robotMesh.add(cap);
+        robotMesh.position.copy(pts[0]);
+        robotGroup.add(robotMesh);
+        const total = Math.max(1, pts.length - 1);
+        robotsRef.current.push({
+          points: pts,
+          robot: robotMesh,
+          frame: 0,
+          maxLen: pts.length,
+          speed: Math.max(0.25, total / 210),
+          pauseEnd: total * 0.18,
+          radius: robotR,
+          up,
+        });
+      }
+    }
+    applyRobotRef.current = applyRobots;
+
     let rafId = 0;
     const tick = () => {
       rafId = requestAnimationFrame(tick);
       controls.update();
+      for (const rs of robotsRef.current) {
+        if (rs.maxLen <= 1) continue;
+        const total = rs.maxLen - 1;
+        rs.frame += rs.speed;
+        if (rs.frame >= total + rs.pauseEnd) rs.frame = 0;
+        const f = Math.min(rs.frame, total);
+        const i0 = Math.floor(f);
+        const i1 = Math.min(i0 + 1, total);
+        const pos = rs.points[i0].clone().lerp(rs.points[i1], f - i0);
+        const delta = pos.clone().sub(rs.robot.position);
+        rs.robot.position.copy(pos);
+        const d = delta.length();
+        if (d > 1e-6) {
+          const axis = new THREE.Vector3().crossVectors(rs.up, delta);
+          if (axis.lengthSq() > 1e-12) {
+            rs.robot.rotateOnWorldAxis(axis.normalize(), d / Math.max(rs.radius, 1e-4));
+          }
+        }
+      }
       renderer.render(scene, camera);
     };
     tick();
@@ -192,6 +352,8 @@ export function MeshViewer({
       renderer.dispose();
       envRef.current = null;
       applyPlacementRef.current = null;
+      applyRobotRef.current = null;
+      robotsRef.current = [];
       if (renderer.domElement.parentNode === container) {
         container.removeChild(renderer.domElement);
       }
@@ -203,6 +365,12 @@ export function MeshViewer({
   useEffect(() => {
     applyPlacementRef.current?.();
   }, [placement]);
+
+  // Rebuild the robots + paths when a new run arrives (no mesh reload).
+  useEffect(() => {
+    applyRobotRef.current?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [robots.map((r) => r.key).join(",")]);
 
   return (
     <div

@@ -14,7 +14,9 @@ class Base(DeclarativeBase):
 
 
 _settings = get_settings()
-engine = create_engine(_settings.database_url, pool_pre_ping=True, future=True)
+_url = _settings.database_url
+_connect_args = {"check_same_thread": False} if _url.startswith("sqlite") else {}
+engine = create_engine(_url, pool_pre_ping=True, future=True, connect_args=_connect_args)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
 
 
