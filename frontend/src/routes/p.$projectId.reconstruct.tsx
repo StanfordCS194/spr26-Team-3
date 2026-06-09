@@ -7,6 +7,7 @@ import { StatusDot } from "@/components/StatusDot";
 import { RadioCardGroup } from "@/components/ui/RadioCardGroup";
 import {
   useBackends,
+  useCancelReconstruction,
   useLatestReconstruction,
   useProjectState,
   useReconstruct,
@@ -23,6 +24,7 @@ function Reconstruct() {
   const { data: backends = [] } = useBackends();
   const { data: latest } = useLatestReconstruction(projectId);
   const reconstruct = useReconstruct(projectId);
+  const cancel = useCancelReconstruction(projectId);
   const [picked, setPicked] = useState<string>("depth_fusion");
   const [depthModel, setDepthModel] = useState<string>("pro");
   const [fov, setFov] = useState<string>("");
@@ -147,25 +149,36 @@ function Reconstruct() {
         </div>
       )}
 
-      <button
-        disabled={running || reconstruct.isPending}
-        onClick={() => {
-          const f = parseFloat(fov);
-          const params: Record<string, unknown> =
-            picked === "depth_fusion" ? { depth_model: depthModel } : {};
-          if (Number.isFinite(f)) params.fov_deg = f;
-          reconstruct.mutate({ backend: picked, params });
-        }}
-        className="mt-6 px-4 py-2 rounded-sm border-2 border-primary text-primary text-sm font-medium hover:bg-primary/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-      >
-        {running
-          ? "Reconstruction running…"
-          : reconstruct.isPending
-          ? "Queuing…"
-          : latest
-          ? "Re-run reconstruction"
-          : "Run reconstruction"}
-      </button>
+      <div className="mt-6 flex items-center gap-3">
+        <button
+          disabled={running || reconstruct.isPending}
+          onClick={() => {
+            const f = parseFloat(fov);
+            const params: Record<string, unknown> =
+              picked === "depth_fusion" ? { depth_model: depthModel } : {};
+            if (Number.isFinite(f)) params.fov_deg = f;
+            reconstruct.mutate({ backend: picked, params });
+          }}
+          className="px-4 py-2 rounded-sm border-2 border-primary text-primary text-sm font-medium hover:bg-primary/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+        >
+          {running
+            ? "Reconstruction running…"
+            : reconstruct.isPending
+            ? "Queuing…"
+            : latest
+            ? "Re-run reconstruction"
+            : "Run reconstruction"}
+        </button>
+        {running && (
+          <button
+            onClick={() => cancel.mutate()}
+            disabled={cancel.isPending}
+            className="px-3 py-2 rounded-sm border border-[var(--status-fail)] text-[var(--status-fail)] text-sm hover:bg-[var(--status-fail)]/10 disabled:opacity-40 transition-colors"
+          >
+            {cancel.isPending ? "Cancelling…" : "Cancel"}
+          </button>
+        )}
+      </div>
 
       {reconstruct.error && (
         <p className="mt-3 text-sm text-[var(--status-fail)] mono">

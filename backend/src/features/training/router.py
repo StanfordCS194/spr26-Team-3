@@ -78,3 +78,19 @@ def get_policy(project: ProjectDep, policy_id: str, db: DbSession) -> Policy:
     if pol is None:
         raise HTTPException(404, f"unknown policy {policy_id}")
     return pol
+
+
+@router.post("/{project_id}/policies/{policy_id}/cancel", response_model=PolicyOut)
+def cancel_policy(project: ProjectDep, policy_id: str, db: DbSession) -> Policy:
+    """Flag a running training job to stop. The training loop checks this flag
+    each logging interval and halts (the partially-trained policy is kept)."""
+    pol = db.get(Policy, policy_id)
+    if pol is None:
+        raise HTTPException(404, f"unknown policy {policy_id}")
+    m = dict(pol.metrics or {})
+    if not m.get("done") and not m.get("error"):
+        m["cancelled"] = True
+        pol.metrics = m  # reassign so SQLAlchemy tracks the JSONB change
+        db.commit()
+        db.refresh(pol)
+    return pol

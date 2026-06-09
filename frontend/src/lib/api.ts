@@ -165,7 +165,7 @@ export type BuildRow = {
   n_hulls: number | null;
   bounds: { min: number[]; max: number[] } | null;
   spawn_region: { xmin: number; xmax: number; ymin: number; ymax: number } | null;
-  status: "pending" | "running" | "ok" | "failed";
+  status: "pending" | "running" | "ok" | "failed" | "cancelled";
   error: string | null;
   created_at: string;
 };
@@ -184,6 +184,17 @@ export const useBuild = (projectId: string) => {
       qc.setQueryData(["latest-build", projectId], created);
       qc.invalidateQueries({ queryKey: ["latest-build", projectId] });
       qc.invalidateQueries({ queryKey: ["project-state", projectId] });
+    },
+  });
+};
+
+export const useCancelBuild = (projectId: string) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => send<BuildRow | null>(`/api/projects/${projectId}/build/cancel`, "POST"),
+    onSuccess: (row) => {
+      if (row) qc.setQueryData(["latest-build", projectId], row);
+      qc.invalidateQueries({ queryKey: ["latest-build", projectId] });
     },
   });
 };
@@ -231,7 +242,7 @@ export type Reconstruction = {
   backend: string;
   params: Record<string, unknown>;
   mesh_path: string | null;
-  status: "pending" | "running" | "ok" | "failed";
+  status: "pending" | "running" | "ok" | "failed" | "cancelled";
   error: string | null;
   elapsed_s: number | null;
   inngest_run_id: string | null;
@@ -271,6 +282,18 @@ export const useReconstruct = (projectId: string) => {
       qc.setQueryData(["reconstruction", projectId], created);
       qc.invalidateQueries({ queryKey: ["reconstruction", projectId] });
       qc.invalidateQueries({ queryKey: ["project-state", projectId] });
+    },
+  });
+};
+
+export const useCancelReconstruction = (projectId: string) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      send<Reconstruction | null>(`/api/projects/${projectId}/reconstruction/cancel`, "POST"),
+    onSuccess: (row) => {
+      if (row) qc.setQueryData(["reconstruction", projectId], row);
+      qc.invalidateQueries({ queryKey: ["reconstruction", projectId] });
     },
   });
 };
@@ -323,7 +346,7 @@ export type Validation = {
   reconstruction_id: string;
   report: import("@/components/ValidationReport").Report | null;
   user_override: boolean;
-  status: "pending" | "running" | "ok" | "failed";
+  status: "pending" | "running" | "ok" | "failed" | "cancelled";
   error: string | null;
   created_at: string;
 };
@@ -368,6 +391,18 @@ export const useValidate = (projectId: string) => {
   });
 };
 
+export const useCancelValidation = (projectId: string) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      send<Validation | null>(`/api/projects/${projectId}/validate/cancel`, "POST"),
+    onSuccess: (row) => {
+      if (row) qc.setQueryData(["validation", projectId], row);
+      qc.invalidateQueries({ queryKey: ["validation", projectId] });
+    },
+  });
+};
+
 // ── PR-C: training + trajectories ──────────────────────────────────────────
 
 export type Policy = {
@@ -384,6 +419,7 @@ export type Policy = {
     elapsed_s?: number;
     trace?: Array<{ step: number; reward: number }>;
     done?: boolean;
+    cancelled?: boolean;
     error?: string;
   };
   created_at: string;
@@ -408,7 +444,7 @@ export const usePolicyLive = (projectId: string, policyId: string | null | undef
     enabled: !!policyId,
     refetchInterval: (q) => {
       const m = (q.state.data as Policy | undefined)?.metrics;
-      return m && !m.done ? 1000 : false;
+      return m && !m.done && !m.cancelled ? 1000 : false;
     },
   });
 
@@ -420,6 +456,19 @@ export const useTrain = (projectId: string) => {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["policies", projectId] });
       qc.invalidateQueries({ queryKey: ["project-state", projectId] });
+    },
+  });
+};
+
+export const useCancelTraining = (projectId: string) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (policyId: string) =>
+      send<Policy>(`/api/projects/${projectId}/policies/${policyId}/cancel`, "POST"),
+    onSuccess: (row) => {
+      qc.setQueryData(["policy", row.id], row);
+      qc.invalidateQueries({ queryKey: ["policy", row.id] });
+      qc.invalidateQueries({ queryKey: ["policies", projectId] });
     },
   });
 };
@@ -443,7 +492,7 @@ export type RunRowDetail = {
   id: string;
   policy_id: string | null;
   baseline: string | null;
-  status: "pending" | "running" | "ok" | "failed";
+  status: "pending" | "running" | "ok" | "failed" | "cancelled";
   error: string | null;
   episodes: number | null;
   successes: number | null;

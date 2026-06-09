@@ -186,6 +186,26 @@ def latest_reconstruction(project: ProjectDep, db: DbSession) -> Reconstruction 
     ).first()
 
 
+@router.post("/projects/{project_id}/reconstruction/cancel", response_model=ReconstructionOut | None)
+def cancel_reconstruction(project: ProjectDep, db: DbSession) -> Reconstruction | None:
+    """Mark the in-flight reconstruction cancelled. The running job checks this
+    between frames and stops; a finished job's result is discarded."""
+    recon = db.scalars(
+        select(Reconstruction)
+        .where(
+            Reconstruction.project_id == project.id,
+            Reconstruction.status.in_(["pending", "running"]),
+        )
+        .order_by(Reconstruction.created_at.desc())
+    ).first()
+    if recon is None:
+        return None
+    recon.status = "cancelled"
+    db.commit()
+    db.refresh(recon)
+    return recon
+
+
 class MeshTransformRequest(BaseModel):
     # 16 floats, column-major (THREE.Matrix4.elements). Maps the raw mesh coords
     # to the placement the user arranged in the viewer, so we can bake it in.

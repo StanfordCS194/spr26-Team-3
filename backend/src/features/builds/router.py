@@ -70,3 +70,21 @@ def latest_build(project: ProjectDep, db: DbSession) -> Build | None:
         .where(Build.project_id == project.id)
         .order_by(Build.created_at.desc())
     ).first()
+
+
+@router.post("/{project_id}/build/cancel", response_model=BuildOut | None)
+def cancel_build(project: ProjectDep, db: DbSession) -> Build | None:
+    build = db.scalars(
+        select(Build)
+        .where(
+            Build.project_id == project.id,
+            Build.status.in_(["pending", "running"]),
+        )
+        .order_by(Build.created_at.desc())
+    ).first()
+    if build is None:
+        return None
+    build.status = "cancelled"
+    db.commit()
+    db.refresh(build)
+    return build

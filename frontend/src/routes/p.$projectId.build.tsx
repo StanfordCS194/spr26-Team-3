@@ -3,7 +3,7 @@ import { useState } from "react";
 
 import { ProjectSceneLayout } from "@/components/ProjectSceneLayout";
 import { StatusDot } from "@/components/StatusDot";
-import { useBuild, useLatestBuild } from "@/lib/api";
+import { useBuild, useCancelBuild, useLatestBuild } from "@/lib/api";
 
 export const Route = createFileRoute("/p/$projectId/build")({
   component: BuildScreen,
@@ -12,6 +12,7 @@ export const Route = createFileRoute("/p/$projectId/build")({
 function BuildScreen() {
   const { projectId } = Route.useParams();
   const build = useBuild(projectId);
+  const cancel = useCancelBuild(projectId);
   const { data: latest } = useLatestBuild(projectId);
   const navigate = useNavigate();
   const [enclose, setEnclose] = useState(true);
@@ -45,13 +46,24 @@ function BuildScreen() {
         </span>
       </label>
 
-      <button
-        disabled={build.isPending || running}
-        onClick={() => build.mutate({ enclose })}
-        className="mt-4 px-4 py-2 rounded-sm border-2 border-primary text-primary text-sm font-medium hover:bg-primary/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-      >
-        {running ? "Building…" : build.isPending ? "Queuing…" : latest ? "Re-build env" : "Build env"}
-      </button>
+      <div className="mt-4 flex items-center gap-3">
+        <button
+          disabled={build.isPending || running}
+          onClick={() => build.mutate({ enclose })}
+          className="px-4 py-2 rounded-sm border-2 border-primary text-primary text-sm font-medium hover:bg-primary/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+        >
+          {running ? "Building…" : build.isPending ? "Queuing…" : latest ? "Re-build env" : "Build env"}
+        </button>
+        {running && (
+          <button
+            onClick={() => cancel.mutate()}
+            disabled={cancel.isPending}
+            className="px-3 py-2 rounded-sm border border-[var(--status-fail)] text-[var(--status-fail)] text-sm hover:bg-[var(--status-fail)]/10 disabled:opacity-40 transition-colors"
+          >
+            {cancel.isPending ? "Cancelling…" : "Cancel"}
+          </button>
+        )}
+      </div>
 
       {build.error && (
         <p className="mt-3 text-sm text-[var(--status-fail)] mono">

@@ -23,6 +23,16 @@ from src.models import Project, Reconstruction
 log = logging.getLogger(__name__)
 
 
+class _Cancelled(Exception):
+    """Raised from the backend progress callback to abort a cancelled run."""
+
+
+def _is_cancelled(reconstruction_id: str) -> bool:
+    with SessionLocal() as db:
+        r = db.get(Reconstruction, reconstruction_id)
+        return r is not None and r.status == "cancelled"
+
+
 @register
 @inngest_client.create_function(
     fn_id="reconstruct-video",
@@ -43,8 +53,10 @@ async def reconstruct_video(ctx: inngest.Context) -> dict:
             recon = db.get(Reconstruction, reconstruction_id)
             if recon is None:
                 raise RuntimeError(f"reconstruction {reconstruction_id} disappeared")
-            recon.status = "running"
-            db.commit()
+            # Don't un-cancel a run the user cancelled before we picked it up.
+            if recon.status != "cancelled":
+                recon.status = "running"
+                db.commit()
             project = db.get(Project, recon.project_id)
             assert project is not None
             video_path = Path(project.video_path) if project.video_path else None
@@ -65,21 +77,34 @@ async def reconstruct_video(ctx: inngest.Context) -> dict:
     extracted = await step.run("extract-frames", _extract)
 
     async def _run_backend() -> dict:
+        # Bail before loading models if already cancelled.
+        if _is_cancelled(reconstruction_id):
+            return {"cancelled": True}
         backend = get_backend(backend_name)
         out_dir = settings.data_dir / "projects" / extracted["project_id"] / "reconstruction"
         t0 = time.time()
         # Forward reconstruction tunables (depth model, FOV override) to the
         # backend; depth_fusion reads them from intrinsics_hint.
         hint = {k: params[k] for k in ("depth_model", "fov_deg") if k in params}
-        result = backend.reconstruct(
-            ReconstructionInput(
-                frames_dir=Path(extracted["frames_dir"]),
-                fps_sampled=float(params.get("fps", 4.0)),
-                intrinsics_hint=hint or None,
-            ),
-            out_dir,
-            progress_cb=lambda _p, _m: None,
-        )
+
+        def _progress(_p: float, _m: str) -> None:
+            # Cooperative cancellation: stop between frames if the user hit
+            # Cancel, so we don't keep burning compute (and memory) on it.
+            if _is_cancelled(reconstruction_id):
+                raise _Cancelled()
+
+        try:
+            result = backend.reconstruct(
+                ReconstructionInput(
+                    frames_dir=Path(extracted["frames_dir"]),
+                    fps_sampled=float(params.get("fps", 4.0)),
+                    intrinsics_hint=hint or None,
+                ),
+                out_dir,
+                progress_cb=_progress,
+            )
+        except _Cancelled:
+            return {"cancelled": True}
         elapsed = time.time() - t0
         return {
             "mesh_path": str(result.mesh_path),
@@ -94,6 +119,9 @@ async def reconstruct_video(ctx: inngest.Context) -> dict:
             r = db.get(Reconstruction, reconstruction_id)
             if r is None:
                 raise RuntimeError(f"reconstruction {reconstruction_id} disappeared")
+            # Leave a cancelled run cancelled — don't flip it to ok.
+            if backend_out.get("cancelled") or r.status == "cancelled":
+                return {"reconstruction_id": reconstruction_id, "cancelled": True}
             r.mesh_path = backend_out["mesh_path"]
             r.status = "ok"
             r.elapsed_s = backend_out["elapsed_s"]
