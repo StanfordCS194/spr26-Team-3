@@ -33,6 +33,9 @@ def get_backend(name: str) -> ReconstructionBackend:
 from src.features.reconstruction.backends import (  # noqa: E402, F401
     demo_fixture,
     depth_fusion,
+    depth_fusion_da3,
+    mapanything,
+    pi3,
     splat,
     vggt,
 )

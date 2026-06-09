@@ -27,7 +27,12 @@ class Settings(BaseSettings):
     # disables all cloud backends (they report implemented=False). Models run
     # remotely on Replicate's GPUs; the worker never loads them locally.
     replicate_api_token: str = ""
-    replicate_vggt_model: str = "vufinder/vggt-1b"
+    # Feed-forward multi-view reconstructors (each a selectable backend).
+    replicate_vggt_model: str = "vufinder/vggt-1b"          # scale-invariant
+    replicate_pi3_model: str = "vufinder/map-anything-pi3"  # VGGT successor, stable
+    replicate_mapanything_model: str = "vufinder/map-anything"  # metric scale
+    # Depth-Anything-3 metric depth — used by the depth_fusion_da3 backend as a
+    # per-frame cloud depth front-end (Matthew's local depth_fusion is separate).
     replicate_depth_model: str = "vufinder/depth-anything-v3-metric"
     # Gaussian-splatting trainer fed depth_fusion poses + init cloud (splat
     # backend). Empty until a multi-view 3DGS trainer is hosted, which keeps the
